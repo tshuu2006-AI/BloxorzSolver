@@ -1,3 +1,6 @@
+from typing import List
+from App.Components.state import State
+
 class Node:
 
     def __init__(
@@ -8,7 +11,23 @@ class Node:
         self.parent = parent
         self.path_cost = path_cost
 
-    def __lt__(self, other: Node) -> bool:
+    @property
+    def parent(self):
+        return self._parent
+
+    @parent.setter
+    def parent(self, value):
+        self._parent = value
+
+    @property
+    def state(self):
+        return self._state
+
+    @state.setter
+    def state(self, value: State):
+        self._state = value
+
+    def __lt__(self, other) -> bool:
         return self.path_cost < other.path_cost
 
     def extract_solution(self) -> List[str]:

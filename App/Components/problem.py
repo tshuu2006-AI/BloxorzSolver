@@ -1,3 +1,6 @@
+from typing import Dict, List, Optional, Tuple
+from App.Components.state import State, Orientation
+from App.Components.features import TileType, Switch, SwitchType, SwitchMode
 
 class Problem:
 
@@ -24,12 +27,36 @@ class Problem:
         self.bridge_indices = bridge_indices
         self.switches = switches
 
+    @property
+    def initial_state(self) -> State:
+        return self.initial
+
     def is_goal(self, s: State) -> bool:
         """Đích chỉ đạt được khi khối đứng thẳng (STANDING) tại ô đích."""
         return s.is_goal(self.goal_pos)
 
-    def action_cost(self, s: State, a, s_new: State) -> int:
-        return 1
+    def action_cost(self, s: State, a: str, s_new: State) -> int:
+        # 1. Đổi khối điều khiển khi đang SPLIT tốn ít chi phí nhất
+        if a == "SWITCH":
+            return 1
+
+        cost = 2  # Chi phí lăn cơ bản trên mặt sàn thường
+
+        # 2. Phạt chi phí nếu lăn đè lên ô mỏng (FRAGILE) vì độ rủi ro cao
+        for cell in s_new.get_occupied_cells():
+            if self.grid.get(cell) == TileType.FRAGILE:
+                cost += 3
+                break
+
+        # 3. Nếu dựng khối từ nằm lên đứng thẳng (STANDING), tốn thêm lực nâng trọng tâm
+        if s.orientation != Orientation.STANDING and s_new.orientation == Orientation.STANDING:
+            cost += 1
+
+        # 4. Khuyến khích (giảm chi phí) nếu nước đi kích hoạt công tắc làm mở/đổi trạng thái cầu
+        if s.bridges_state != s_new.bridges_state:
+            cost = max(1, cost - 1)
+
+        return cost
 
     def actions(self, s: State) -> list:
         """Trả về các hành động hợp lệ từ trạng thái s."""
