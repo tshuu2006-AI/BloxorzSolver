@@ -1,11 +1,16 @@
 import argparse
+import sys
 from typing import List, Optional
 
+# Ensure UTF-8 output on Windows console
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
 
 from App.Components.features import TileType, SwitchType, SwitchMode, Switch
 from App.Components.state import Orientation, State
 from App.Components.node import Node
 from App.Components.problem import Problem
+from App.Solvers.DFS_solver import DFSSolver
 from App.Solvers.UCS_solver import UCSSolver
 from App.Solvers.A_star_solver import AstarSolver
 
@@ -372,8 +377,8 @@ def build_test_5_hardcore_stage() -> Problem:
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the Bloxorz sample problems.")
     parser.add_argument(
-        "--solver", choices=("ucs", "astar"), default="ucs",
-        help="Search algorithm to use (default: ucs).",
+        "--solver", choices=("dfs", "ucs", "astar"), default="dfs",
+        help="Search algorithm to use: dfs, ucs, or astar (default: dfs).",
     )
     parser.add_argument(
         "--heuristic", choices=("manhattan", "orientation", "relaxed"),
@@ -389,6 +394,9 @@ if __name__ == "__main__":
         solver = AstarSolver()
         solver.heuristic = args.heuristic
         solver_label = f"A* ({args.heuristic})"
+    elif args.solver == "dfs":
+        solver = DFSSolver()
+        solver_label = "Depth-First Search (DFS)"
     else:
         solver = UCSSolver()
         solver_label = "Uniform-Cost Search (UCS)"

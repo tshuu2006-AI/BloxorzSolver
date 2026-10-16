@@ -50,7 +50,7 @@ class PriorityQueue:
     def __len__(self):
         return len(self._heap)
 
-class BestFirstSearchSolver(ABC, BaseSolver):
+class BestFirstSearchSolver(BaseSolver):
     """Best First Search Algorithm"""
     def __init__(self):
         super().__init__()

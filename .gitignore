@@ -1,0 +1,7 @@
+**/__pycache__/
+*.py[cod]
+*$py.class
+
+introduction_solve.md
+.idea/
+.vscode/
