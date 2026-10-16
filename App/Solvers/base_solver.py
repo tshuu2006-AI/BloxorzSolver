@@ -9,6 +9,28 @@ from abc import ABC, abstractmethod
 import heapq
 import itertools
 
+class BaseSolver(ABC):
+    def __init__(self):
+        self.search_time: float = 0.0
+        self.memory_usage: int = 0  # Lưu theo Bytes (hoặc đổi sang KB/MB)
+        self.expanded_nodes: int = 0
+        self.solution_length: int = 0
+        self.solution_cost: int = 0
+        self.problem: Problem
+
+    @abstractmethod
+    def solve(self, problem: Problem):
+        pass
+
+    def get_metrics(self) -> dict:
+        """Trả về các chỉ số đánh giá để hiển thị lên GUI hoặc xuất báo cáo."""
+        return {
+            "search_time_sec": round(self.search_time, 6),
+            "peak_memory_kb": round(self.memory_usage / 1024, 2),
+            "expanded_nodes": self.expanded_nodes,
+            "solution_length": self.solution_length,
+            "solution_cost": self.solution_cost,
+        }
 
 class PriorityQueue:
     def __init__(self, key: Callable = lambda x: x):
@@ -28,19 +50,15 @@ class PriorityQueue:
     def __len__(self):
         return len(self._heap)
 
-class BestFirstSearchSolver(ABC):
+class BestFirstSearchSolver(ABC, BaseSolver):
     """Best First Search Algorithm"""
     def __init__(self):
-        self.search_time: float = 0.0
-        self.memory_usage: int = 0  # Lưu theo Bytes (hoặc đổi sang KB/MB)
-        self.expanded_nodes: int = 0
-        self.solution_length: int = 0
-        self.solution_cost: int = 0
-        self.problem: Problem
+        super().__init__()
 
     @abstractmethod
     def evaluate(self, node: Node) -> float:
         pass
+
 
     def solve(self, problem: Problem) -> Optional[List[str]]:
         self.problem = problem
@@ -89,15 +107,5 @@ class BestFirstSearchSolver(ABC):
 
         return solution
 
-
-    def get_metrics(self) -> dict:
-        """Trả về các chỉ số đánh giá để hiển thị lên GUI hoặc xuất báo cáo."""
-        return {
-            "search_time_sec": round(self.search_time, 6),
-            "peak_memory_kb": round(self.memory_usage / 1024, 2),
-            "expanded_nodes": self.expanded_nodes,
-            "solution_length": self.solution_length,
-            "solution_cost": self.solution_cost,
-        }
 
 
