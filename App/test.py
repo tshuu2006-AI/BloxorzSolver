@@ -1,4 +1,4 @@
-import sys
+import argparse
 from typing import List, Optional
 
 
@@ -7,6 +7,7 @@ from App.Components.state import Orientation, State
 from App.Components.node import Node
 from App.Components.problem import Problem
 from App.Solvers.UCS_solver import UCSSolver
+from App.Solvers.A_star_solver import AstarSolver
 
 
 
@@ -368,11 +369,32 @@ def build_test_5_hardcore_stage() -> Problem:
     )
 
 
+def parse_args():
+    parser = argparse.ArgumentParser(description="Run the Bloxorz sample problems.")
+    parser.add_argument(
+        "--solver", choices=("ucs", "astar"), default="ucs",
+        help="Search algorithm to use (default: ucs).",
+    )
+    parser.add_argument(
+        "--heuristic", choices=("manhattan", "orientation", "relaxed"),
+        default="relaxed",
+        help="A* heuristic (only used with --solver astar; default: relaxed).",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    solver = UCSSolver()
+    args = parse_args()
+    if args.solver == "astar":
+        solver = AstarSolver()
+        solver.heuristic = args.heuristic
+        solver_label = f"A* ({args.heuristic})"
+    else:
+        solver = UCSSolver()
+        solver_label = "Uniform-Cost Search (UCS)"
 
     print("=" * 70)
-    print("CHẠY KIỂM THỬ THUẬT TOÁN UNIFORM-COST SEARCH (UCS)")
+    print(f"CHẠY KIỂM THỬ THUẬT TOÁN {solver_label}")
     print("=" * 70)
 
     # Chạy Test 1
@@ -381,13 +403,13 @@ if __name__ == "__main__":
     sol1 = solver.solve(p1)
     verify_and_replay(p1, sol1, solver.get_metrics())
 
-    # Chạy Test 2 (So sánh trực quan hành vi của UCS khi thay đổi hàm chi phí)
-    print("--- TEST 2A: Màn Fragile (Với hàm chi phí hiện tại trong Problem) ---")
+    # So sánh đường đi với chi phí mặc định và mức phạt fragile cao.
+    print("--- TEST 2A: Màn Fragile (Chi phí mặc định) ---")
     p2 = build_test_2_fragile()
     sol2 = solver.solve(p2)
     verify_and_replay(p2, sol2, solver.get_metrics())
 
-    print("--- TEST 2B: Màn Fragile (Khi tăng phạt rủi ro ô FRAGILE lên +10) ---")
+    print("--- TEST 2B: Màn Fragile (Tăng phạt ô FRAGILE lên +10) ---")
     # Ghi đè thử nghiệm hàm chi phí phạt nặng ô FRAGILE để xem UCS tự động đi đường vòng
     def high_risk_cost(s: State, a: str, s_new: State) -> int:
         cost = 2
@@ -413,7 +435,7 @@ if __name__ == "__main__":
     verify_and_replay(p4, sol4, solver.get_metrics())
 
     # Chạy Test 5 (Bản đồ lớn & phức tạp)
-    print("--- TEST 5A: Map Lớn 'The Gauntlet' (Chi phí đồng nhất = 1) ---")
+    print("--- TEST 5: Map Lớn 'The Gauntlet' ---")
     p5 = build_test_5_hardcore_stage()
     print_ascii_map(p5)
     sol5_uniform = solver.solve(p5)

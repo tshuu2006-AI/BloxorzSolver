@@ -16,15 +16,15 @@ class Node:
         return self._parent
 
     @parent.setter
-    def parent(self, value):
+    def parent(self, value) -> None:
         self._parent = value
 
     @property
-    def state(self):
+    def state(self) -> State:
         return self._state
 
     @state.setter
-    def state(self, value: State):
+    def state(self, value: State) -> None:
         self._state = value
 
     def __lt__(self, other) -> bool:
