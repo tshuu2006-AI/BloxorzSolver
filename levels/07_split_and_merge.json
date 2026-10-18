@@ -1,0 +1,19 @@
+{
+  "name": "Split and Merge",
+  "group": "split",
+  "description": "Standing on the split switch cuts the block in two. Press Space to swap cubes; side-by-side cubes merge again.",
+  "grid": [
+    "S##p.",
+    "..#..",
+    "..B..",
+    "..#o.",
+    "..G.."
+  ],
+  "bridges": [
+    {"cells": [[2, 2]], "open": false}
+  ],
+  "switches": [
+    {"pos": [0, 3], "targets": [[1, 2], [3, 2]]},
+    {"pos": [3, 3], "mode": "open", "link": [0]}
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Heavy Duty",
+  "group": "switch",
+  "description": "A heavy switch only reacts to a block standing upright on it.",
+  "grid": [
+    "S###......",
+    "##x##BBB#G",
+    "####......"
+  ],
+  "bridges": [{"cells": [[1, 5], [1, 6], [1, 7]], "open": false}],
+  "switches": [{"pos": [1, 2], "mode": "open", "link": [0]}]
+}

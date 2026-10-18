@@ -1,0 +1,12 @@
+{
+  "name": "Soft Touch",
+  "group": "switch",
+  "description": "Any part of the block can press a soft switch.",
+  "grid": [
+    "......o......",
+    "......#......",
+    "S######BBB##G"
+  ],
+  "bridges": [{"cells": [[2, 7], [2, 8], [2, 9]], "open": false}],
+  "switches": [{"pos": [0, 6], "mode": "toggle", "link": [0]}]
+}

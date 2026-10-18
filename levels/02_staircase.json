@@ -1,0 +1,12 @@
+{
+  "name": "Staircase",
+  "group": "simple",
+  "description": "Mind your orientation as the path steps down and to the right.",
+  "grid": [
+    "S#####....",
+    "######....",
+    "..######..",
+    "....######",
+    "......###G"
+  ]
+}

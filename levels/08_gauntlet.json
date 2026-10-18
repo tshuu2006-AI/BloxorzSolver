@@ -1,0 +1,104 @@
+{
+  "name": "The Gauntlet",
+  "group": "combined",
+  "description": "Fragile tiles, bridges, heavy, soft and split switches in one stage.",
+  "grid": [
+    "..FF.......",
+    ".S###.....p",
+    ".##x#BB##F#",
+    ".##....##F#",
+    ".......###.",
+    "...........",
+    "..##B##B#..",
+    "..#oFF.o#..",
+    "....FF.##..",
+    "....FFG##.."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          5
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          2,
+          6
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          6,
+          4
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          6,
+          7
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        2,
+        3
+      ],
+      "mode": "open",
+      "link": [
+        0,
+        1
+      ]
+    },
+    {
+      "pos": [
+        1,
+        10
+      ],
+      "targets": [
+        [
+          6,
+          2
+        ],
+        [
+          6,
+          8
+        ]
+      ]
+    },
+    {
+      "pos": [
+        7,
+        3
+      ],
+      "mode": "open",
+      "link": [
+        3
+      ]
+    },
+    {
+      "pos": [
+        7,
+        7
+      ],
+      "mode": "open",
+      "link": [
+        2
+      ]
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "name": "First Roll",
+  "group": "simple",
+  "description": "Roll the block and drop it upright into the hole.",
+  "grid": [
+    "###.......",
+    "#S####....",
+    "#######...",
+    "..#######.",
+    "....##G###",
+    "......###."
+  ]
+}

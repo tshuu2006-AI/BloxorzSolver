@@ -1,0 +1,11 @@
+{
+  "name": "Thin Ice",
+  "group": "fragile",
+  "description": "Orange tiles crack if you stand on them. Lie across them instead.",
+  "grid": [
+    "#####....#####",
+    "#S###FFFF#####",
+    "#####FFFF#####",
+    "#####....##G##"
+  ]
+}
