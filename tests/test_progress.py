@@ -1,4 +1,4 @@
-﻿"""Progress: lưu/đọc tiến độ, chịu được file thiếu hoặc hỏng."""
+"""Progress: lưu/đọc tiến độ, chịu được file thiếu hoặc hỏng."""
 
 import json
 import tempfile
@@ -41,6 +41,13 @@ class ProgressFile(unittest.TestCase):
         self.path.write_text(json.dumps({"best": {"A": "x", "B": -4, "C": 7}}), encoding="utf-8")
         pr = Progress(self.path)
         self.assertEqual((pr.best("A"), pr.best("B"), pr.best("C")), (None, None, 7))
+
+    def test_reset_clears_everything_and_persists(self):
+        pr = Progress(self.path)
+        pr.record_win("A", 5)
+        pr.reset()
+        self.assertIsNone(pr.best("A"))
+        self.assertIsNone(Progress(self.path).best("A"))
 
 
 if __name__ == "__main__":

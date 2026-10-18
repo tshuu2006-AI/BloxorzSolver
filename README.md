@@ -7,7 +7,7 @@ Bloxorz game (pygame GUI) plus search solvers (BFS / DFS / UCS / A*) for the CSC
 ```bash
 pip install -r requirements.txt
 python play.py          # open the game (starts at Classic 01)
-python play.py classic 12   # jump to Classic 12;  `python play.py ours 5` = our stage 5
+python play.py classic 12   # jump to Classic 12;  `python play.py custom 5` = custom stage 5
 python -m App.test --solver ucs   # CLI check of the hand-built test levels
 python -m unittest discover -s tests -t .   # unit tests
 ```
@@ -18,6 +18,8 @@ when split, `R` restart, `Z` undo, `N` stage select, `Enter` next stage after a 
 
 Camera: `Q`/`E` or mouse wheel zoom, right-mouse drag rotates and tilts (or `[` `]` rotate, `PgUp`/`PgDn` tilt),
 middle-mouse drag pans, `C` resets the view.
+
+**Compare all** (next to the SOLVERS label) runs every available algorithm on the current stage one after another (each in its own process, 60 s timeout, so a slow one can't freeze the game) and opens a table of moves, cost, expanded nodes, time and peak memory with bars, the best value per column highlighted, and an *optimal* tag. Click a row to replay that algorithm's solution; **Save CSV** writes `results/compare_<stage>.csv`. BFS is skipped automatically until `App/Solvers/BFS_solver.py` exists.
 
 After a solver finishes, its path is drawn on the board as numbered tiles (`V` or the Path button toggles it). While a replay is paused,
 `,` and `.` (or the arrow buttons) step it backward and forward. Cleared stages and your best move counts are remembered in
@@ -34,7 +36,7 @@ The window is a 1920x1080 canvas scaled to your screen.
 | `App/Game/` | `GameSession` (moves, undo, win/fall) and `solver_bridge.py` (runs a solver from the GUI) |
 | `App/GUI/` | pygame app (`app.py`), isometric renderer (`render.py`), widgets, theme |
 | `levels/classic/*.json` | The 33 original stages (`NOTICE.md` has the source) |
-| `levels/*.json` | Our own stages, loaded in file-name order |
+| `levels/*.json` | Custom stages (our own), loaded in file-name order |
 | `tests/` | Unit tests (transition table, every tile type, session, all stages solvable) |
 
 ## Stages
@@ -79,7 +81,7 @@ Recreated from the original game; see `levels/classic/NOTICE.md` for the source 
 | 32 | 9x14 | 129 | bridges, switches |
 | 33 | 10x15 | 65 | bridges, switches |
 
-### Our stages - 20 stages in `levels/`, grouped by difficulty (simple, fragile, switch, split, combined). Numbers below come from the default UCS cost function (`Problem.action_cost`); `moves` excludes `SWITCH` actions.
+### Custom stages - 20 stages in `levels/`, grouped by difficulty (simple, fragile, switch, split, combined). Numbers below come from the default UCS cost function (`Problem.action_cost`); `moves` excludes `SWITCH` actions.
 
 | # | Stage | Group | Size | UCS moves | UCS cost | UCS expanded |
 |---|---|---|---|---|---|---|
@@ -104,11 +106,31 @@ Recreated from the original game; see `levels/classic/NOTICE.md` for the source 
 | 19 | Switchboard | combined | 6x24 | 16 | 38 | 1990 |
 | 20 | Grand Tour | combined | 12x28 | 55 | 134 | 912 |
 
+### Settings, tips and extras
+
+The right-hand panel has two tabs (**Tab** switches): **PLAY** keeps the everyday controls, **SETTINGS** holds the rest
+(move-keys compass, camera help, floor arrows, switch link lines, default tilt, tips, camera reset, screenshot, reset progress).
+The A* heuristic selector stays on the PLAY tab next to the solver buttons. Choices are saved to `.bloxorz_settings.json` (git-ignored).
+
+- **Switch link lines** (off by default): dashed lines from each switch to the bridges it controls (dot = opens, x = closes,
+  ring = toggles) and from a split switch to its two landing cells.
+- **Tips**: the first time a mechanic (rolling, fragile tiles, switches/bridges, heavy switches, splitting) appears, a small card
+  explains it. They can be switched off or shown again in Settings.
+- **Split cubes**: the cube you control is bright with a white outline and a bouncing arrow; the other is dark and translucent.
+- **Screenshots**: `F12` or the Settings button saves `screenshots/bloxorz_<time>.png` (git-ignored).
+- **Polish**: the block squashes a little when it lands, a soft glow with rising sparks marks a switch that fires
+  (and the bridges it changes), the goal hole opens and swallows the block on a win (it shrinks and darkens as it
+  drops in), and the stage picker shows isometric previews drawn by the same renderer as the board.
+- **Sound**: short effects (landing thud, switch click, bridge open/close, split/merge, fall, win) are synthesized in
+  code (`App/Game/synth.py`), so there are no audio files. `M` or Settings > Sound mutes them; volume is a slider
+  there. If no audio device exists the game simply stays silent.
+- **Race**: in the Compare table, tick two algorithms and press **Race selected** to play their solutions side by side, each on
+  its own board, one action at a time, with per-algorithm stats and a "who arrives first" result.
 ## Benchmark (for the report's Experiments section)
 
 ```bash
-python benchmark.py                           # every stage (classic + ours) x every available solver
-python benchmark.py --set classic             # only the 33 originals (`--set custom`: only ours)
+python benchmark.py                           # every stage (classic + custom) x every available solver
+python benchmark.py --set classic             # only the 33 originals (`--set custom`: only the custom ones)
 python benchmark.py --repeat 5 --timeout 120  # median of 5 runs, kill a run after 120 s
 python benchmark.py --set custom --levels 1-8,20 --solvers "UCS,A*"
 pip install -r requirements-experiments.txt   # once, for the charts

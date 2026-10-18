@@ -44,6 +44,16 @@ def smoothstep(t: float) -> float:
     return t * t * (3 - 2 * t)
 
 
+LAND_DUR = 0.30
+
+
+def squash_curve(u: float) -> float:
+    """Ép dẹt khi chạm sàn rồi nảy lại có giảm chấn: dương = dẹt, âm = giãn nhẹ."""
+    if u < 0.0 or u >= 1.0:
+        return 0.0
+    return 0.16 * math.exp(-3.5 * u) * math.cos(7.5 * u)
+
+
 ELEV_MIN, ELEV_MAX = math.radians(18), math.radians(80)
 ZOOM_MIN, ZOOM_MAX = 0.45, 3.2
 
@@ -107,7 +117,8 @@ class Iso:
     tâm bàn cờ luôn ở giữa vùng vẽ (cộng thêm ``cam.pan``).
     """
 
-    def __init__(self, rows: int, cols: int, area: pygame.Rect, cam: Optional[Camera] = None):
+    def __init__(self, rows: int, cols: int, area: pygame.Rect, cam: Optional[Camera] = None,
+                 min_fit: float = 24.0):
         cam = cam or Camera()
         self.depth = 0.42  # độ dày ô sàn (đơn vị chiều cao)
 
@@ -117,7 +128,7 @@ class Iso:
         ys = [c * dcy + r * dry for r in (0, rows) for c in (0, cols)]
         w1 = max(xs) - min(xs)
         h1 = (max(ys) - min(ys)) + (2 + self.depth) * duz
-        fit = max(24.0, min(100.0, 0.95 * area.w / w1, 0.96 * area.h / h1))
+        fit = max(min_fit, min(100.0, 0.95 * area.w / w1, 0.96 * area.h / h1))
 
         (cx, cy), (rx, ry), uz, view = _axes(cam.alpha, cam.elev)
         self.L = fit * cam.zoom
@@ -188,14 +199,20 @@ class Particle:
 
 
 class BoardRenderer:
-    def __init__(self, level, area: Optional[pygame.Rect] = None, cam: Optional[Camera] = None):
+    def __init__(self, level, area: Optional[pygame.Rect] = None, cam: Optional[Camera] = None,
+                 min_fit: float = 24.0):
         self.level = level
+        self.min_fit = min_fit  # cạnh ô nhỏ nhất cho phép (ảnh xem trước cần nhỏ hơn mặc định)
         self.problem = level.problem
         self.area = area or theme.BOARD_VIEW
         self.time = 0.0
         self.particles: List[Particle] = []
         self.start_cell = self.problem.initial_state.get_occupied_cells()[0]
         self._labels = {}
+        self.swap_pop = 0.0  # >0 ngay sau khi đổi khối điều khiển, làm mũi tên phình to
+        self.landing: Optional[dict] = None  # {"cells", "t"}: khối vừa hạ xuống, bị ép dẹt một thoáng
+        self.glows: List[dict] = []  # vầng sáng quanh công tắc / cầu vừa đổi trạng thái
+        self._fxbuf: Optional[pygame.Surface] = None
         self.set_camera(cam or Camera())
 
         n_bridges = len(self.problem.bridge_indices)
@@ -211,7 +228,7 @@ class BoardRenderer:
     # ------------------------------------------------------------------ cập nhật
     def set_camera(self, cam: Camera) -> None:
         """Dựng lại phép chiếu và thứ tự vẽ khi góc nhìn đổi."""
-        self.iso = Iso(self.level.rows, self.level.cols, self.area, cam)
+        self.iso = Iso(self.level.rows, self.level.cols, self.area, cam, self.min_fit)
         self.tile_order = sorted(
             self.problem.grid, key=lambda rc: (self.iso.order(*rc), rc[0], rc[1])
         )
@@ -223,6 +240,14 @@ class BoardRenderer:
 
     def update(self, dt: float) -> None:
         self.time += dt
+        self.swap_pop = max(0.0, self.swap_pop - dt * 3.5)
+        if self.landing is not None:
+            self.landing["t"] += dt
+            if self.landing["t"] >= LAND_DUR:
+                self.landing = None
+        for g in self.glows:
+            g["t"] += dt
+        self.glows = [g for g in self.glows if g["t"] < g["dur"]]
         for i, target in enumerate(self.bridge_target):
             cur = self.bridge_v[i]
             step = dt * 3.2
@@ -244,6 +269,45 @@ class BoardRenderer:
                 Particle(x, y, math.cos(ang) * sp, math.sin(ang) * sp * 0.7 - 260,
                          random.uniform(0.6, 1.3), random.choice(colors), random.randint(3, 7))
             )
+
+    def land_on(self, cells: Sequence[Cell]) -> None:
+        """Bắt đầu hiệu ứng ép dẹt cho khối vừa hạ xuống ``cells``."""
+        self.landing = {"cells": tuple(cells), "t": 0.0}
+
+    def glow(self, cell: Cell, color, strength: float = 1.0, dur: float = 0.9) -> None:
+        """Vầng sáng mềm lan ra từ ô ``cell`` (công tắc vừa kích hoạt, cầu vừa đổi, hố đích)."""
+        self.glows.append({"cell": cell, "color": color, "t": 0.0, "dur": dur, "k": strength})
+        # vài tia sáng bay lên, vẽ cùng lớp hạt (nằm trên khối nên vẫn thấy khi khối đứng lên công tắc)
+        x, y = self.iso.p(cell[0] + 0.5, cell[1] + 0.5, 0.1)
+        hi = tuple(int(v) for v in mix(color, (255, 255, 255), 0.55))
+        for _ in range(int(10 * strength)):
+            self.particles.append(
+                Particle(x + random.uniform(-14, 14), y, random.uniform(-40, 40), random.uniform(-420, -240),
+                         random.uniform(0.5, 0.9), random.choice((color, hi)), random.randint(2, 4))
+            )
+
+    def squash_at(self, cells: Sequence[Cell]) -> float:
+        """Độ ép dẹt hiện tại (>0 dẹt, <0 giãn nhẹ khi nảy lại) của khối đang phủ ``cells``."""
+        if self.landing is None or self.landing["cells"] != tuple(cells):
+            return 0.0
+        return squash_curve(self.landing["t"] / LAND_DUR)
+
+    def draw_glows(self, surf) -> None:
+        for g in self.glows:
+            u = g["t"] / g["dur"]
+            fade = (1 - u) ** 1.5 * g["k"]
+            col = g["color"]
+            # lõi sáng mờ dần + các vòng lan rộng
+            for half, a in ((0.34, 190), (0.5, 120), (0.7, 64)):
+                h = half * (0.7 + 0.8 * u)
+                pts = [(int(x), int(y)) for x, y in self._diamond(g["cell"], h, 0.04)]
+                gfx.filled_polygon(surf, pts, (*col, min(255, int(a * fade))))
+            ring = 0.3 + 0.9 * smoothstep(u)
+            pts = [(int(x), int(y)) for x, y in self._ring(g["cell"], ring, 20, 0.0, 0.05)]
+            hi = tuple(int(v) for v in mix(col, (255, 255, 255), 0.5))
+            gfx.aapolygon(surf, pts, (*hi, min(255, int(220 * fade))))
+            gfx.aapolygon(surf, [(int(x), int(y)) for x, y in self._ring(g["cell"], ring * 0.82, 20, 0.0, 0.05)],
+                          (*col, min(255, int(120 * fade))))
 
     def draw_particles(self, surf) -> None:
         for pt in self.particles:
@@ -467,7 +531,42 @@ class BoardRenderer:
             self._labels[key] = img
         return img
 
-    def draw_path(self, surf, steps, done: Optional[int] = None) -> None:
+    def draw_link_lines(self, surf, segments) -> None:
+        """Đường nét đứt chạy từ công tắc tới cầu / ô đích mà nó điều khiển (nét đứt "chảy" về phía đích).
+
+        Đầu mút: chấm đặc = mở cầu, dấu x = đóng cầu, vòng tròn = đảo trạng thái, hình thoi = điểm tách khối.
+        """
+        iso = self.iso
+        dash, gap = 12.0, 10.0
+        shift = (self.time * 38.0) % (dash + gap)
+        for s in segments:
+            col = theme.SPLIT_COLOR if s.group < 0 else theme.BRIDGE_COLORS[s.group % len(theme.BRIDGE_COLORS)]
+            ax, ay = iso.p(s.source[0] + 0.5, s.source[1] + 0.5, 0.06)
+            bx, by = iso.p(s.target[0], s.target[1], 0.06)
+            length = math.hypot(bx - ax, by - ay)
+            if length < 2:
+                continue
+            ux, uy = (bx - ax) / length, (by - ay) / length
+            pos = -(dash + gap) + shift
+            while pos < length:
+                s0, s1 = max(0.0, pos), min(length, pos + dash)
+                if s1 > s0:
+                    pygame.draw.line(
+                        surf, col, (ax + ux * s0, ay + uy * s0), (ax + ux * s1, ay + uy * s1), 3
+                    )
+                pos += dash + gap
+            pygame.draw.circle(surf, col, (int(ax), int(ay)), 4)
+            end = (int(bx), int(by))
+            if s.kind == "open":
+                pygame.draw.circle(surf, col, end, 7)
+            elif s.kind == "toggle":
+                pygame.draw.circle(surf, col, end, 8, 3)
+            elif s.kind == "close":
+                for sx, sy in ((1, 1), (1, -1)):
+                    pygame.draw.line(surf, col, (end[0] - 7 * sx, end[1] - 7 * sy), (end[0] + 7 * sx, end[1] + 7 * sy), 4)
+            else:  # split
+                pygame.draw.polygon(surf, col, [(end[0], end[1] - 8), (end[0] + 8, end[1]), (end[0], end[1] + 8), (end[0] - 8, end[1])])
+    def draw_path(self, surf, steps, done: Optional[int] = None, palette=None) -> None:
         """Lớp phủ đường đi của lời giải: ô nào khối đáp xuống, đánh số theo thứ tự.
 
         ``done`` là số hành động đã chạy trong replay (các bước đã qua sáng hơn);
@@ -478,7 +577,7 @@ class BoardRenderer:
         size = max(11, int(iso.L * 0.24))
         for s in steps:
             t = (s["step"] - 1) / max(1, last - 1)
-            col = mix(theme.INFO, theme.ACCENT, t)
+            col = mix(*(palette or (theme.INFO, theme.ACCENT)), t)
             reached = done is None or s["step"] <= done
             fill, line = (84 if done is None else 120, 200) if reached else (34, 96)
             for cell in s["cells"]:
@@ -493,9 +592,11 @@ class BoardRenderer:
     def draw_floor_ring(self, surf, cell, color, strength=1.0):
         pulse = 0.5 + 0.5 * math.sin(self.time * 5.0)
         pts = [(int(x), int(y)) for x, y in self._diamond(cell, 0.5 + 0.02 * pulse, 0.03)]
-        gfx.aapolygon(surf, pts, (*color, int((120 + 120 * pulse) * strength)))
-        pts2 = [(int(x), int(y)) for x, y in self._diamond(cell, 0.46, 0.03)]
-        gfx.aapolygon(surf, pts2, (*color, int(90 * strength)))
+        gfx.filled_polygon(surf, pts, (*color, int(46 * strength)))
+        gfx.aapolygon(surf, pts, (*color, min(255, int((140 + 115 * pulse) * strength))))
+        for half, a in ((0.46, 120), (0.42, 70)):
+            pts2 = [(int(x), int(y)) for x, y in self._diamond(cell, half, 0.03)]
+            gfx.aapolygon(surf, pts2, (*color, int(a * strength)))
 
     def draw_piece(
         self,
@@ -508,25 +609,42 @@ class BoardRenderer:
         dz: float = 0.0,
         alpha: float = 1.0,
         active: bool = True,
+        color=None,
+        scale: float = 1.0,
+        shadow: bool = True,
     ) -> None:
         """Vẽ một khối 3D phủ ``cells`` cao ``height`` (đơn vị ô).
 
         ``roll = (hướng, theta)`` xoay khối quanh cạnh đáy phía hướng lăn.
         """
         r0, c0, r1, c1 = box = piece_box(cells)
+        if roll is None and dz == 0.0:
+            sq = self.squash_at(cells)  # vừa hạ xuống: ép dẹt rồi nảy lại
+            if sq:
+                height *= 1.0 - sq
+                scale *= 1.0 + 0.5 * sq
+        if scale != 1.0:
+            mr, mc = (r0 + r1) / 2, (c0 + c1) / 2
+            vr0, vr1 = mr + (r0 - mr) * scale, mr + (r1 - mr) * scale
+            vc0, vc1 = mc + (c0 - mc) * scale, mc + (c1 - mc) * scale
+        else:
+            vr0, vr1, vc0, vc1 = r0, r1, c0, c1
         verts = [
-            (r0, c0, 0.0), (r0, c1, 0.0), (r1, c1, 0.0), (r1, c0, 0.0),
-            (r0, c0, height), (r0, c1, height), (r1, c1, height), (r1, c0, height),
+            (vr0, vc0, 0.0), (vr0, vc1, 0.0), (vr1, vc1, 0.0), (vr1, vc0, 0.0),
+            (vr0, vc0, height), (vr0, vc1, height), (vr1, vc1, height), (vr1, vc0, height),
         ]
         if roll is not None:
             verts = self._rotate(verts, box, *roll)
         verts = [(r, c, z + dz) for r, c, z in verts]
 
-        if kind == "block":
+        cube = kind != "block"
+        if color is not None:
+            base = color
+        elif not cube:
             base = theme.BLOCK
         else:
-            base = theme.CUBE if active else theme.CUBE_DIM
-        a255 = max(0, min(255, int(255 * alpha)))
+            base = theme.CUBE_ACTIVE if active else theme.CUBE_INACTIVE
+        a255 = max(0, min(255, int(255 * alpha * (0.86 if (cube and not active and color is None) else 1.0))))
         if a255 <= 0:
             return
 
@@ -535,7 +653,7 @@ class BoardRenderer:
         cs = [v[1] for v in verts]
         zmin = min(v[2] for v in verts)
         sh_alpha = int(88 * alpha * max(0.0, min(1.0, 1 + zmin / 3.0)))
-        if sh_alpha > 4:
+        if shadow and sh_alpha > 4:
             p = self.iso.p
             gfx.filled_polygon(
                 surf,
@@ -558,6 +676,7 @@ class BoardRenderer:
             faces.append((_dot(fc, self.iso.view), q, n))
         faces.sort(key=lambda item: item[0])
 
+        outline = cube and active and color is None and a255 >= 250
         for _, q, n in faces:
             lum = 0.50 + 0.66 * max(0.0, _dot(n, self.iso.light))
             col = shade(base, lum)
@@ -569,6 +688,61 @@ class BoardRenderer:
             gfx.filled_polygon(
                 surf, [(int(x), int(y)) for x, y in inner], (*shade(col, 1.14), int(a255 * 0.42))
             )
+            if outline:  # khối đang điều khiển: viền trắng dày để nổi bật
+                pygame.draw.polygon(surf, (255, 255, 255), [(int(x), int(y)) for x, y in pts], 3)
+        if outline and roll is None and dz == 0.0:
+            self._draw_marker(surf, (r0 + r1) / 2, (c0 + c1) / 2, height)
+
+    def draw_swallow(self, surf, cells: Sequence[Cell], kind: str, height: float, p: float, color=None) -> None:
+        """Khối chìm xuống hố đích (``p`` 0..1): hố nở ra, khối thu nhỏ và tối dần khi tụt vào trong.
+
+        Phần khối còn trên mặt sàn vẽ bình thường; phần đã lọt xuống dưới mặt sàn chỉ hiện ra
+        trong miệng hố (cắt bằng mặt nạ hình thoi) và tối đi theo độ sâu.
+        """
+        cell = cells[0]
+        e = smoothstep(p)
+        d = e * (height + 0.35)
+        scale = 1.0 - 0.4 * smoothstep(p * 1.4)
+
+        grow = math.sin(math.pi * min(1.0, p * 1.5))
+        poly(surf, (2, 3, 6), self._diamond(cell, 0.27 + 0.10 * grow, 0.02))
+        for k in range(3):  # các gợn co dần vào miệng hố, như bị hút xuống
+            v = (p * 1.7 + k / 3.0) % 1.0
+            pts = [(int(x), int(y)) for x, y in self._diamond(cell, 0.52 - 0.30 * v, 0.025)]
+            gfx.aapolygon(surf, pts, (*theme.GOAL_RING, int(210 * (1 - v) * (1 - 0.5 * p))))
+
+        if d < height:
+            self.draw_piece(surf, cells, kind, height - d, color=color, scale=scale, shadow=False)
+        lh = min(d, height)
+        if lh > 0.01:
+            rim = [(int(x), int(y)) for x, y in self._diamond(cell, 0.41, 0.0)]
+            xs, ys = [q[0] for q in rim], [q[1] for q in rim]
+            bb = pygame.Rect(min(xs) - 2, min(ys) - 2, max(xs) - min(xs) + 5, max(ys) - min(ys) + 5)
+            if self._fxbuf is None or self._fxbuf.get_size() != surf.get_size():
+                self._fxbuf = pygame.Surface(surf.get_size(), pygame.SRCALPHA)
+            bb = bb.clip(self._fxbuf.get_rect())
+            if bb.w > 2 and bb.h > 2:
+                sub = self._fxbuf.subsurface(bb)
+                sub.fill((0, 0, 0, 0))
+                self.draw_piece(self._fxbuf, cells, kind, lh, dz=-d, color=color, scale=scale, shadow=False)
+                v = int(255 * max(0.1, 1.0 - 0.85 * min(1.0, d / max(height, 0.1))))
+                sub.fill((v, v, v, 255), special_flags=pygame.BLEND_RGBA_MULT)
+                mask = pygame.Surface(bb.size, pygame.SRCALPHA)
+                local = [(x - bb.x, y - bb.y) for x, y in rim]
+                gfx.filled_polygon(mask, local, (255, 255, 255, 255))
+                sub.blit(mask, (0, 0), special_flags=pygame.BLEND_RGBA_MULT)
+                surf.blit(sub, bb.topleft)
+        pygame.draw.polygon(surf, (70, 78, 104), [(int(x), int(y)) for x, y in self._diamond(cell, 0.41, 0.0)], 2)
+
+    def _draw_marker(self, surf, r: float, c: float, height: float) -> None:
+        """Mũi tên nhún nhảy phía trên khối đang điều khiển (phình to một chút ngay sau khi bấm Space)."""
+        bob = 0.14 * math.sin(self.time * 5.0)
+        x, y = self.iso.p(r, c, height + 0.62 + bob)
+        s = max(9.0, self.iso.L * 0.17) * (1.0 + 0.9 * self.swap_pop)
+        pts = [(int(x - s), int(y - s * 1.25)), (int(x + s), int(y - s * 1.25)), (int(x), int(y))]
+        gfx.filled_polygon(surf, pts, (*theme.ACCENT, 255))
+        gfx.aapolygon(surf, pts, (255, 255, 255, 255))
+        pygame.draw.polygon(surf, (255, 255, 255), pts, 2)
 
     @staticmethod
     def _rotate(verts, box, direction, theta):

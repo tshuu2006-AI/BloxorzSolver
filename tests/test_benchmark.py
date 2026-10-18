@@ -26,7 +26,7 @@ class Rows(unittest.TestCase):
         self.assertEqual(row["status"], "ok")
         self.assertTrue(row["valid"])
         self.assertGreater(row["expanded"], 0)
-        self.assertGreater(row["time_ms"], 0)
+        self.assertGreaterEqual(row["time_ms"], 0)  # đồng hồ Windows thô: có thể ra 0.0 với màn rất nhỏ
         self.assertGreater(row["memory_kb"], 0)
         self.assertEqual(row["moves"], row["length"])  # màn không có SWITCH
 

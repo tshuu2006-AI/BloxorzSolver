@@ -213,3 +213,48 @@ class Segmented:
                 surf, opt, theme.font(17, True),
                 (28, 22, 8) if i == self.selected else theme.TEXT_DIM, cell.center, "center",
             )
+
+
+class Toggle:
+    """Công tắc bật/tắt một dòng: nhãn bên trái, nút gạt dạng viên thuốc bên phải."""
+
+    def __init__(self, rect, label: str, value: bool, on_change: Callable[[bool], None], hint: str = ""):
+        self.rect = pygame.Rect(rect)
+        self.label = label
+        self.hint = hint
+        self.value = value
+        self.on_change = on_change
+        self._pos = 1.0 if value else 0.0  # vị trí núm gạt (0..1) để chạy hiệu ứng
+        self.hover = 0.0
+        self.pressed = False
+
+    def update(self, dt, mouse):
+        self._pos += ((1.0 if self.value else 0.0) - self._pos) * min(1.0, dt * 16)
+        target = 1.0 if self.rect.collidepoint(mouse) else 0.0
+        self.hover += (target - self.hover) * min(1.0, dt * 14)
+
+    def handle(self, event, mouse) -> bool:
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.rect.collidepoint(mouse):
+            self.pressed = True
+            return True
+        if event.type == pygame.MOUSEBUTTONUP and event.button == 1:
+            was, self.pressed = self.pressed, False
+            if was and self.rect.collidepoint(mouse):
+                self.value = not self.value
+                self.on_change(self.value)
+                return True
+        return False
+
+    def draw(self, surf):
+        r = self.rect
+        if self.hover > 0.02:
+            rrect(surf, r, (*theme.CARD_HI, int(120 * self.hover)), 12)
+        draw_text(surf, self.label, theme.font(19, True), theme.TEXT, (r.x + 14, r.centery - (9 if self.hint else 0)), "midleft")
+        if self.hint:
+            draw_text(surf, self.hint, theme.font(14), theme.TEXT_FAINT, (r.x + 14, r.centery + 12), "midleft")
+        track = pygame.Rect(0, 0, 54, 28)
+        track.midright = (r.right - 14, r.centery)
+        col = theme.mix((52, 60, 84), theme.ACCENT_DARK, self._pos)
+        rrect(surf, track, col, 14, theme.mix(theme.PANEL_EDGE, theme.ACCENT, self._pos), 2)
+        kx = track.x + 14 + int(self._pos * (track.w - 28))
+        pygame.draw.circle(surf, theme.mix(theme.TEXT_DIM, (255, 255, 255), self._pos), (kx, track.centery), 10)

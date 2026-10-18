@@ -7,3 +7,6 @@ introduction_solve.md
 .vscode/
 .bloxorz_progress.json
 results/
+
+.bloxorz_settings.json
+screenshots/

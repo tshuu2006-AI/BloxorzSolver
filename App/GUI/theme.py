@@ -50,6 +50,10 @@ GOAL_RING = (255, 226, 130)
 BLOCK = (244, 192, 62)
 CUBE = (78, 196, 206)
 CUBE_DIM = (52, 128, 142)
+# Hai khối đơn phải phân biệt được ngay: khối đang điều khiển sáng + viền trắng + mũi tên,
+# khối còn lại xám xanh tối và hơi trong.
+CUBE_ACTIVE = (70, 236, 250)
+CUBE_INACTIVE = (66, 78, 104)
 
 # Mỗi nhóm cầu một màu để nhìn ra công tắc nào điều khiển cầu nào.
 BRIDGE_COLORS = [

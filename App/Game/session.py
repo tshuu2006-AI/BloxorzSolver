@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Tuple
 
-from App.Components.features import TileType
+from App.Components.features import SwitchType, TileType
 from App.Components.level_loader import Level
 from App.Components.state import Orientation, State
 
@@ -76,6 +76,29 @@ def explain_fall(problem, s: State, action: str) -> Tuple[str, Tuple[Cell, ...]]
     if orient == Orientation.STANDING and problem.grid.get(b1) == TileType.FRAGILE:
         return "The fragile tile cracked under the standing block.", fall_cells
     return "The floor disappeared under the block.", fall_cells
+
+
+def fired_switches(problem, ev: "MoveEvent") -> List[Cell]:
+    """Ô công tắc mà nước đi ``ev`` vừa kích hoạt (để GUI làm hiệu ứng phát sáng)."""
+    if ev.outcome not in (Outcome.MOVED, Outcome.WON):
+        return []
+    geom = problem._compute_next_geometry(ev.prev, ev.action)
+    if geom is None:
+        return []
+    orient, b1, b2 = geom
+    if ev.prev.is_split:
+        landed = (b1 if ev.prev.active_block == 0 else b2,)
+    else:
+        landed = (b1,) if orient == Orientation.STANDING else (b1, b2)
+    fired = []
+    for cell in landed:
+        sw = problem.switches.get(cell)
+        if sw is None:
+            continue
+        if sw.switch_type != SwitchType.SOFT and orient != Orientation.STANDING:
+            continue  # công tắc nặng / tách chỉ chạy khi khối đứng thẳng
+        fired.append(cell)
+    return fired
 
 
 class GameSession:

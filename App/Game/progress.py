@@ -49,3 +49,8 @@ class Progress:
         self._best[name] = moves
         self._save()
         return True
+
+    def reset(self) -> None:
+        """Xoá toàn bộ tiến độ (nút Reset progress trong Settings)."""
+        self._best = {}
+        self._save()
