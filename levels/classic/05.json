@@ -1,0 +1,101 @@
+{
+  "name": "Classic 05",
+  "group": "classic",
+  "description": "Level 5 of the original game. Features: bridges.",
+  "reference_moves": 33,
+  "grid": [
+    "...........####",
+    ".####BB#o####S#",
+    ".####.......###",
+    ".##o#..........",
+    ".####..........",
+    "...###o#BB###..",
+    "..........####o",
+    "###.......#####",
+    "#G###BB######..",
+    "####..........."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          1,
+          5
+        ],
+        [
+          1,
+          6
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          5,
+          8
+        ],
+        [
+          5,
+          9
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          8,
+          5
+        ],
+        [
+          8,
+          6
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        1,
+        8
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        3,
+        3
+      ],
+      "mode": "open",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        5,
+        6
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        6,
+        14
+      ],
+      "mode": "toggle",
+      "link": [
+        2
+      ]
+    }
+  ]
+}

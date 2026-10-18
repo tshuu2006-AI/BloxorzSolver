@@ -1,0 +1,132 @@
+{
+  "name": "Classic 18",
+  "group": "classic",
+  "description": "Level 18 of the original game. Features: bridges.",
+  "reference_moves": 85,
+  "grid": [
+    ".......o.......",
+    "##o#...#.......",
+    "#####..#.......",
+    "#oS#####BB##BB#",
+    "#####B..#...#..",
+    "##o#....#...#..",
+    "#.......o..###.",
+    "#.........##G#.",
+    "#BBx......####."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          3,
+          8
+        ],
+        [
+          3,
+          9
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          3,
+          12
+        ],
+        [
+          3,
+          13
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          4,
+          5
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          8,
+          1
+        ],
+        [
+          8,
+          2
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        0,
+        7
+      ],
+      "mode": "open",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        1,
+        2
+      ],
+      "mode": "close",
+      "link": [
+        1,
+        3
+      ]
+    },
+    {
+      "pos": [
+        3,
+        1
+      ],
+      "mode": "close",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        5,
+        2
+      ],
+      "mode": "close",
+      "link": [
+        1,
+        3
+      ]
+    },
+    {
+      "pos": [
+        6,
+        8
+      ],
+      "mode": "open",
+      "link": [
+        1,
+        3
+      ]
+    },
+    {
+      "pos": [
+        8,
+        3
+      ],
+      "mode": "toggle",
+      "link": [
+        2
+      ]
+    }
+  ]
+}

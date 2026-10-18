@@ -1,0 +1,1591 @@
+"""Cửa sổ chính của game Bloxorz (pygame, canvas logic 1920x1080).
+
+Phím: mũi tên / WASD lăn khối, Space đổi khối đơn, R chơi lại, Z hoàn tác,
+N chọn màn, Enter sang màn kế khi thắng, F11 toàn màn hình.
+Các phím mũi tên khớp với trục của bàn: Right = sang phải (Tây -> Đông),
+Left = sang trái, Up = lên-trái (về phía trục hàng ``r`` giảm), Down = xuống-phải.
+"""
+
+from __future__ import annotations
+
+import ctypes
+import math
+import os
+import sys
+import time
+from collections import deque
+from pathlib import Path
+from typing import Deque, Dict, List, Optional
+
+import pygame
+
+from App.Components.features import SwitchType, TileType
+from App.Components.level_loader import Level, load_levels
+from App.Components.state import Orientation, State
+from App.Game.compare import CompareJob
+from App.Game.experiment import compare_configs, write_csv
+from App.Game.links import link_segments
+from App.Game.path import path_steps
+from App.Game.progress import Progress
+from App.Game.settings import Settings
+from App.Game.tips import TIPS, tip_for
+from App.Game.session import DELTAS, GameSession, Outcome, Status, fired_switches
+from App.Game.solver_bridge import (
+    HEURISTICS,
+    SOLVER_ORDER,
+    SolveOutcome,
+    SolverJob,
+    available_solvers,
+)
+from App.GUI import theme
+from App.GUI.audio import Audio
+from App.GUI.compare_view import CompareView
+from App.GUI.pieces import pieces_of
+from App.GUI.race import LANE_COLORS, Race
+from App.GUI.render import BoardRenderer, Camera, smoothstep
+from App.GUI.widgets import (
+    Button,
+    Segmented,
+    Slider,
+    Toggle,
+    draw_text,
+    rrect,
+    vgradient,
+    wrap_text,
+)
+
+LEVELS_DIR = Path(__file__).resolve().parents[2] / "levels"
+CLASSIC_DIR = LEVELS_DIR / "classic"
+PROGRESS_PATH = Path(__file__).resolve().parents[2] / ".bloxorz_progress.json"
+SETTINGS_PATH = Path(__file__).resolve().parents[2] / ".bloxorz_settings.json"
+SCREENSHOT_DIR = Path(__file__).resolve().parents[2] / "screenshots"
+
+KEY_ACTIONS = {
+    pygame.K_UP: "U", pygame.K_w: "U",
+    pygame.K_DOWN: "D", pygame.K_s: "D",
+    pygame.K_LEFT: "L", pygame.K_a: "L",
+    pygame.K_RIGHT: "R", pygame.K_d: "R",
+}
+SOLVER_SUB = {
+    "BFS": "breadth-first",
+    "DFS": "depth-first",
+    "UCS": "uniform-cost",
+    "A*": "heuristic",
+}
+SOLVER_COLORS = {
+    "BFS": (92, 190, 236),
+    "DFS": (236, 120, 210),
+    "UCS": (140, 218, 92),
+    "A*": (255, 196, 64),
+}
+
+
+# ---------------------------------------------------------------------------
+# Khối hiển thị
+# ---------------------------------------------------------------------------
+
+class Anim:
+    kind = ""
+
+    def __init__(self, dur, on_start=None, on_finish=None, statics=None):
+        self.dur = dur
+        self.t = 0.0
+        self.started = False
+        self.on_start = on_start
+        self.on_finish = on_finish
+        self.statics = statics or []
+
+
+class RollAnim(Anim):
+    kind = "roll"
+
+    def __init__(self, piece, direction, **kw):
+        super().__init__(0.24, **kw)
+        self.piece, self.direction = piece, direction
+
+
+class FallAnim(Anim):
+    kind = "fall"
+
+    def __init__(self, piece, **kw):
+        super().__init__(0.55, **kw)
+        self.piece = piece
+
+
+class SinkAnim(Anim):
+    kind = "sink"
+
+    def __init__(self, piece, **kw):
+        super().__init__(0.7, **kw)
+        self.piece = piece
+
+
+class SpawnAnim(Anim):
+    kind = "spawn"
+
+    def __init__(self, pieces, **kw):
+        super().__init__(0.45, **kw)
+        self.pieces = pieces
+
+
+# ---------------------------------------------------------------------------
+class App:
+    def __init__(self, start_level: int = 0):
+        try:  # giữ nét trên màn hình có scale DPI
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+        # Canvas 1920x1080 được GPU phóng ra màn hình thật. Mặc định pygame dùng lọc
+        # "nearest" nên khi tỉ lệ không nguyên (vd 1.5x trên 2880x1800) các nét bị vỡ
+        # răng cưa; lọc tuyến tính cho ảnh mượt.
+        os.environ.setdefault("PYGAME_FORCE_SCALE", "photo")
+        os.environ.setdefault("SDL_RENDER_SCALE_QUALITY", "linear")
+        pygame.init()
+        pygame.display.set_caption("Bloxorz")
+        self._open_window()
+        self.clock = pygame.time.Clock()
+        self.bg = vgradient((theme.WIDTH, theme.HEIGHT), theme.BG_TOP, theme.BG_BOTTOM)
+
+        # Classic = 33 màn gốc của game; custom = các màn nhóm tự thiết kế.
+        self.levels: List[Level] = load_levels(CLASSIC_DIR, "classic") if CLASSIC_DIR.exists() else []
+        self.levels += load_levels(LEVELS_DIR, "custom")
+        if not self.levels:
+            raise SystemExit(f"Không tìm thấy màn chơi trong {LEVELS_DIR}")
+        self.picker_tab = self.levels[0].section
+        self.progress = Progress(PROGRESS_PATH)
+        self.settings = Settings(SETTINGS_PATH)
+        theme.AXIS_TILT_DEG = self.settings.tilt_deg  # góc nhìn mặc định (trước khi tạo Camera)
+        self.audio = Audio(self.settings.sound_on, self.settings.volume)
+        self.panel_tab = "play"  # "play" | "settings"
+        self.reset_armed_until = 0.0
+        self.picker_scroll = 0.0
+        self.picker_sel = 0
+        self.used_solver = False
+        self.thumbs: Dict[int, pygame.Surface] = {}
+        self.picker_open = False
+        self.running = True
+
+        self.toasts: List[dict] = []
+        self.key_flash = {"U": 0.0, "D": 0.0, "L": 0.0, "R": 0.0}
+        self.compare_job: Optional[CompareJob] = None
+        self.compare_open = False
+        self.compare_store: Dict[int, dict] = {}  # chỉ số màn -> kết quả lần so sánh gần nhất
+        self.compare_skipped: List[str] = []
+        self.compare_view = CompareView(
+            self._replay_row, self.start_compare, self._save_compare_csv, self.close_compare, self.start_race
+        )
+        self.race: Optional[Race] = None
+        self.race_paused = False
+        self.show_path = self.settings.show_path
+        self.tip: Optional[str] = None  # khoá gợi ý đang hiện
+        self.tip_start_moves = 0
+        self._tip_pending = True
+        self.path_steps: List[dict] = []
+        self.replay_done: List[str] = []
+        self.step_req = 0
+        self.cam = Camera()
+        self.cam_dirty = False
+        self.cam_drag = None  # "rotate" | "pan" khi đang kéo chuột
+        self.heuristic = (
+            self.settings.astar_heuristic if self.settings.astar_heuristic in HEURISTICS else "relaxed"
+        )
+        self.speed = self.settings.replay_speed
+        self.job: Optional[SolverJob] = None
+        self.stats: Optional[SolveOutcome] = None
+        self.available = available_solvers()
+        self._avail_timer = 0.0
+
+        self._build_widgets()
+        self.load_level(max(0, min(start_level, len(self.levels) - 1)))
+
+    # ------------------------------------------------------------------ cửa sổ
+    def _open_window(self):
+        size = (theme.WIDTH, theme.HEIGHT)
+        try:
+            dw, dh = pygame.display.get_desktop_sizes()[0]
+        except Exception:
+            dw, dh = size
+        flags = pygame.SCALED | pygame.RESIZABLE
+        if dw < theme.WIDTH + 40 or dh < theme.HEIGHT + 120:
+            flags = pygame.SCALED | pygame.FULLSCREEN  # màn nhỏ: toàn màn hình, F11 để thoát
+        self.screen = pygame.display.set_mode(size, flags)
+
+    # ------------------------------------------------------------------ widget
+    def _build_widgets(self):
+        x0 = theme.PANEL_RECT.x + 28
+        w = theme.PANEL_RECT.w - 56
+        self.x0, self.pw = x0, w
+        right = x0 + w
+
+        # --- thanh tab PLAY / SETTINGS ---
+        tw = (w - 12) // 2
+        self.tab_rects = {
+            "play": pygame.Rect(x0, 112, tw, 38),
+            "settings": pygame.Rect(x0 + tw + 12, 112, tw, 38),
+        }
+
+        # --- tab PLAY: chỉ các điều khiển dùng nhiều nhất ---
+        bw = (w - 24) // 3
+        self.btn_new = Button((x0, 346, bw, 56), "New Game", self.open_picker, "primary")
+        self.btn_restart = Button((x0 + bw + 12, 346, bw, 56), "Restart", self.restart)
+        self.btn_undo = Button((x0 + 2 * (bw + 12), 346, bw, 56), "Undo", self.undo)
+
+        self.solver_buttons: Dict[str, Button] = {}
+        sw = (w - 12) // 2
+        for i, name in enumerate(SOLVER_ORDER):
+            rect = (x0 + (i % 2) * (sw + 12), 452 + (i // 2) * 76, sw, 64)
+            self.solver_buttons[name] = Button(
+                rect, name, lambda n=name: self.start_solver(n), "secondary",
+                accent=SOLVER_COLORS[name], sublabel=SOLVER_SUB[name],
+            )
+        self.heur_seg = Segmented(
+            (x0, 640, w, 40), HEURISTICS, HEURISTICS.index(self.heuristic), self._set_heuristic
+        )
+        ry = 704
+        self.btn_fwd = Button((right - 60, ry, 60, 52), "", lambda: self._request_step(1), tooltip="Step forward  (.)", icon="fwd")
+        self.btn_pause = Button((right - 60 - 8 - 100, ry, 100, 52), "Pause", self.toggle_pause)
+        self.btn_back = Button((right - 60 - 8 - 100 - 8 - 60, ry, 60, 52), "", lambda: self._request_step(-1), tooltip="Step back  (,)", icon="back")
+        self.slider = Slider((x0, ry + 32, self.btn_back.rect.x - 20 - x0, 24), 0.5, 4.0, self.speed, "Replay speed")
+        self.stats_box = pygame.Rect(x0, 804, w, 190)
+        self.btn_path = Button((x0 + w - 148, 816, 128, 34), "Path: on", self.toggle_path, font_size=17)
+        self.btn_compare = Button((x0 + w - 180, 412, 180, 34), "Compare all", self.open_compare, font_size=17)
+
+        # --- tab SETTINGS: tuỳ chọn nâng cao, gom theo nhóm ---
+        S = self.settings
+        self.settings_labels = [("DISPLAY", 168), ("CAMERA", 398), ("HELP", 552), ("SOUND", 700), ("TOOLS", 860)]
+        row = 46
+        self.toggles = [
+            Toggle((x0, 190, w, 44), "Move-keys compass", S.show_compass, lambda v: S.set("show_compass", v)),
+            Toggle((x0, 190 + row, w, 44), "Camera help card", S.show_camera_help, lambda v: S.set("show_camera_help", v)),
+            Toggle((x0, 190 + 2 * row, w, 44), "Floor arrows around the block", S.show_floor_arrows, lambda v: S.set("show_floor_arrows", v)),
+            Toggle((x0, 190 + 3 * row, w, 44), "Switch link lines", S.show_link_lines, lambda v: S.set("show_link_lines", v),
+                   hint="Dashed line from each switch to its bridges"),
+        ]
+        self.tilt_slider = Slider((x0 + 4, 456, w - 8, 24), 0.0, 45.0, S.tilt_deg, "Default tilt", fmt="{:.0f}\u00b0")
+        self.btn_cam_reset = Button((x0, 490, w, 44), "Reset camera  (C)", self._reset_camera, font_size=19)
+        self.tip_toggle = Toggle((x0, 572, w, 44), "Show tutorial tips", S.show_tips, lambda v: S.set("show_tips", v))
+        self.toggles.append(self.tip_toggle)
+        self.btn_tips_again = Button((x0, 618, w, 40), "Show all tips again", self._show_tips_again, font_size=18)
+        self.sound_toggle = Toggle(
+            (x0, 722, w, 44), "Sound effects", S.sound_on, lambda v: self._set_sound(v, toast=False),
+            hint="Press M to mute or unmute",
+        )
+        self.toggles.append(self.sound_toggle)
+        self.volume_slider = Slider((x0 + 4, 812, w - 8, 24), 0.0, 1.0, S.volume, "Volume", fmt="{:.0%}")
+        hw = (w - 12) // 2
+        self.btn_shot = Button((x0, 884, hw, 50), "Save screenshot  (F12)", self.save_screenshot, font_size=17)
+        self.btn_reset_progress = Button((x0 + hw + 12, 884, hw, 50), "Reset progress", self._reset_progress_click, font_size=17)
+        # nút trong banner thắng / thua
+        cx = theme.BOARD_AREA.centerx
+        self.banner_rect = pygame.Rect(cx - 330, 872, 660, 170)
+        r = self.banner_rect
+        self.btn_next = Button((r.x + 36, r.bottom - 70, 280, 50), "Next stage  (Enter)", self.next_level, "primary")
+        self.btn_stages = Button((r.right - 316, r.bottom - 70, 280, 50), "Stage select  (N)", self.open_picker)
+        self.btn_banner_undo = Button((r.x + 36, r.bottom - 70, 280, 50), "Undo  (Z)", self.undo, "primary")
+        self.btn_banner_restart = Button((r.right - 316, r.bottom - 70, 280, 50), "Restart  (R)", self.restart)
+        bw3 = 220
+        self.race_buttons = [
+            Button((cx - 346, 966, bw3, 48), "Pause  (Space)", self.toggle_race_pause, font_size=19),
+            Button((cx - 346 + bw3 + 16, 966, bw3, 48), "Restart  (R)", self.restart_race, font_size=19),
+            Button((cx - 346 + 2 * (bw3 + 16), 966, bw3, 48), "Exit race  (Esc)", self.exit_race, "primary", font_size=19),
+        ]
+        self.tip_rect = pygame.Rect(cx - 390, 876, 780, 160)
+        self.btn_tip_ok = Button(
+            (self.tip_rect.right - 216, self.tip_rect.centery - 22, 190, 44), "Got it  (Enter)",
+            self.dismiss_tip, "primary", font_size=19,
+        )
+        self.paused = False
+        self._layout_bottom_boxes()
+
+    def _bottom_span(self):
+        """Khoảng ngang còn trống ở đáy bàn cờ, bên phải các thẻ Move keys / Camera (nếu đang hiện)."""
+        left = 28
+        if self.settings.show_compass:
+            left += 252 + 14
+        if self.settings.show_camera_help:
+            left += 372 + 14
+        return left + 10, theme.BOARD_AREA.right - 20
+
+    def _layout_bottom_boxes(self):
+        """Đặt hộp banner thắng/thua và thẻ gợi ý nằm gọn trong khoảng trống, không đè lên thẻ camera."""
+        lo, hi = self._bottom_span()
+        cx = (lo + hi) // 2
+        width = max(300, min(640, hi - lo))
+        r = self.banner_rect
+        r.update(cx - width // 2, 872, width, 170)
+        half = (width - 24 * 2 - 16) // 2
+        for b in (self.btn_next, self.btn_banner_undo):
+            b.rect.update(r.x + 24, r.bottom - 70, half, 50)
+        for b in (self.btn_stages, self.btn_banner_restart):
+            b.rect.update(r.right - 24 - half, r.bottom - 70, half, 50)
+        t = self.tip_rect
+        t.update(cx - width // 2, 864, width, 188)
+        self.btn_tip_ok.rect.update(t.right - 24 - 170, t.y + 18, 170, 40)
+
+    def _set_heuristic(self, name: str):
+        self.heuristic = name
+        self.settings.set("astar_heuristic", name)
+
+    def _reset_camera(self):
+        self.cam.reset()
+        self.cam_dirty = True
+        self.toast("Camera reset", theme.INFO, 1.4)
+
+    def _set_tilt(self, deg: float):
+        theme.AXIS_TILT_DEG = deg
+        self.settings.set("tilt_deg", deg)
+        self.thumbs.clear()  # ảnh xem trước màn chơi dùng cùng góc nhìn
+        self.cam.reset()
+        self.cam_dirty = True
+
+    def _set_sound(self, on: bool, toast: bool = True):
+        self.audio.set_enabled(on)
+        self.settings.set("sound_on", on)
+        self.sound_toggle.value = on
+        if toast:
+            self.toast("Sound on" if on else "Sound muted  (M)", theme.INFO, 1.4)
+        if on:
+            self.audio.play("switch")
+
+    def _show_tips_again(self):
+        self.settings.reset_tips()
+        self.toast("Tips will show again on the next stage", theme.INFO, 2.6)
+
+    def _reset_progress_click(self):
+        now = pygame.time.get_ticks() / 1000.0
+        if now < self.reset_armed_until:
+            self.progress.reset()
+            self.reset_armed_until = 0.0
+            self.toast("Progress cleared", theme.GOOD, 2.2)
+        else:
+            self.reset_armed_until = now + 3.0
+            self.toast("Click Reset progress again to confirm", theme.BAD, 3.0)
+
+    def save_screenshot(self):
+        SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
+        path = SCREENSHOT_DIR / time.strftime("bloxorz_%Y%m%d_%H%M%S.png")
+        try:
+            pygame.image.save(self.screen, str(path))
+            self.toast(f"Saved screenshots/{path.name}", theme.GOOD, 3.0)
+        except (pygame.error, OSError) as exc:
+            self.toast(f"Could not save screenshot: {exc}", theme.BAD, 4.0)
+
+    def _main_buttons(self) -> List[Button]:
+        if self.panel_tab == "settings":
+            return [self.btn_cam_reset, self.btn_tips_again, self.btn_shot, self.btn_reset_progress]
+        return [
+            self.btn_new, self.btn_restart, self.btn_undo, *self.solver_buttons.values(),
+            self.btn_back, self.btn_pause, self.btn_fwd, self.btn_path, self.btn_compare,
+        ]
+    def _banner_buttons(self) -> List[Button]:
+        if self.anims:
+            return []
+        if self.session.status == Status.WON:
+            return [self.btn_next, self.btn_stages]
+        if self.session.status == Status.LOST:
+            return [self.btn_banner_undo, self.btn_banner_restart]
+        return []
+
+    # ------------------------------------------------------------------ màn chơi
+    def load_level(self, index: int):
+        self.level_idx = index
+        self.level = self.levels[index]
+        self.session = GameSession(self.level)
+        self.renderer = BoardRenderer(self.level, cam=self.cam)
+        self.renderer.set_bridges(self.session.state.bridges_state, snap=True)
+        self.anims: Deque[Anim] = deque()
+        self.queued: Optional[str] = None
+        self.replay: Deque[str] = deque()
+        self.replay_timer = 0.0
+        self.replay_total = 0
+        self.replay_label = ""
+        self.paused = False
+        self.used_solver = False
+        self.lost_cells = None
+        self.job = None
+        self.stats = None
+        self.path_steps = []
+        self.replay_done = []
+        self.link_segs = link_segments(self.level)
+        self.tip = None
+        self._tip_pending = True
+        self.toasts.clear()
+        self.picker_open = False
+        self.toast(self.level.name, theme.group_color(self.level.group), 2.0)
+
+    def restart(self):
+        self._reset_play()
+        self.session.reset()
+        self.renderer.set_bridges(self.session.state.bridges_state)
+
+    def _reset_play(self):
+        self.used_solver = False
+        self.replay_done = []
+        self.anims.clear()
+        self.queued = None
+        self.replay.clear()
+        self.paused = False
+        self.lost_cells = None
+
+    def undo(self):
+        if self.anims:
+            self.anims.clear()
+        self.replay.clear()
+        self.replay_done = []
+        if self.session.undo():
+            self.lost_cells = None
+            self.renderer.set_bridges(self.session.state.bridges_state)
+
+    def next_level(self):
+        self.load_level((self.level_idx + 1) % len(self.levels))
+
+    def open_picker(self):
+        self.picker_tab = self.level.section
+        self.picker_sel = self.level_idx
+        self.picker_scroll = 0.0
+        self._picker_scroll_to(self.picker_sel)
+        self.picker_open = True
+
+    def toast(self, text: str, color=None, ttl: float = 2.6):
+        self.toasts.append({"text": text, "color": color or theme.TEXT, "ttl": ttl, "age": 0.0})
+        self.toasts = self.toasts[-3:]
+
+    # ------------------------------------------------------------------ hành động
+    def do_action(self, action: str, from_replay: bool = False):
+        if action in self.key_flash:
+            self.key_flash[action] = 1.0  # làm sáng hướng này trên la bàn / mũi tên sàn
+        elif action == "SWITCH":
+            self.renderer.swap_pop = 1.0
+        if self.anims:
+            if not from_replay:
+                self.queued = action
+            return None
+        if not from_replay:
+            self.replay.clear()  # người chơi can thiệp: dừng replay
+            self.replay_done.clear()
+        ev = self.session.apply(action)
+        self._present(ev)
+        return ev
+
+    def _present(self, ev):
+        o = ev.outcome
+        if o == Outcome.IGNORED:
+            return
+        if o == Outcome.BLOCKED:
+            self.toast(ev.reason, theme.BAD)
+            self.audio.play("blocked")
+            return
+        if o == Outcome.SWITCHED:
+            self.audio.play("swap")
+            return
+
+        prev = ev.prev
+        pcs = pieces_of(prev)
+        if prev.is_split:
+            i = prev.active_block
+            moving, statics = pcs[i], [pcs[1 - i]]
+        else:
+            moving, statics = pcs[0], []
+        direction = DELTAS[ev.action]
+
+        def after_roll():
+            if ev.new is not None:
+                self.renderer.set_bridges(ev.new.bridges_state)
+                self._landing_fx(ev)
+                opened = [i for i, v in ev.bridge_changes.items() if v]
+                closed = [i for i, v in ev.bridge_changes.items() if not v]
+                if opened and closed:
+                    self.toast("Bridges toggled", theme.INFO)
+                elif opened:
+                    self.toast("Bridge opened", theme.GOOD)
+                elif closed:
+                    self.toast("Bridge closed", theme.BAD)
+                if ev.merged:
+                    self.toast("Cubes merged back into a block", theme.CUBE)
+
+        anims: List[Anim] = [RollAnim(moving, direction, statics=statics, on_finish=after_roll)]
+        if o == Outcome.FELL:
+            cells = ev.fall_cells
+            if prev.is_split:
+                piece = {"cells": cells, "kind": "cube", "height": 1.0, "active": True}
+            else:
+                piece = {
+                    "cells": cells, "kind": "block",
+                    "height": 2.0 if len(cells) == 1 else 1.0, "active": True,
+                }
+            self.lost_cells = moving["cells"]
+            anims.append(FallAnim(piece, statics=statics, on_start=lambda: self.audio.play("fall")))
+        elif o == Outcome.WON:
+            goal = self.level.problem.goal_pos
+            new_best = not self.used_solver and self.progress.record_win(self.level.name, self.session.moves)
+            if new_best:
+                self.toast(f"New best: {self.session.moves} moves", theme.GOOD, 3.0)
+            piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True}
+
+            def swallowed():
+                self.renderer.burst(goal)
+                self.renderer.glow(goal, theme.GOAL_RING, 1.3, dur=1.2)
+                self.audio.play("win")
+                if new_best:
+                    self.audio.play("best")
+
+            anims.append(SinkAnim(piece, on_start=swallowed))
+        elif ev.teleported:
+            anims.append(SpawnAnim(
+                pieces_of(ev.new),
+                on_start=lambda: self.toast("Split! Press Space to swap cubes", theme.SPLIT_COLOR, 3.2),
+            ))
+        self.anims.extend(anims)
+
+    def _landing_fx(self, ev):
+        """Hiệu ứng lúc khối chạm sàn: ép dẹt, vầng sáng ở công tắc / cầu vừa đổi, và âm thanh."""
+        pb, rd = self.level.problem, self.renderer
+        if ev.outcome == Outcome.MOVED and not ev.teleported:
+            pcs = pieces_of(ev.new)
+            k = ev.prev.active_block if (ev.prev.is_split and ev.new.is_split) else 0
+            rd.land_on(pcs[k]["cells"])
+        if ev.outcome == Outcome.WON:
+            return
+        self.audio.play("roll")
+        fired = fired_switches(pb, ev)
+        for cell in fired:
+            sw = pb.switches[cell]
+            col = rd.bridge_color[pb.bridge_indices[sw.linked_bridges[0]]] if sw.linked_bridges else theme.SPLIT_COLOR
+            rd.glow(cell, col)
+        for idx in ev.bridge_changes:
+            if rd.bridge_cell[idx] is not None:
+                rd.glow(rd.bridge_cell[idx], rd.bridge_color[idx], 0.8)
+        if fired:
+            self.audio.play("switch")
+        if any(ev.bridge_changes.values()):
+            self.audio.play("bridge_open")
+        if not all(ev.bridge_changes.values()):
+            self.audio.play("bridge_close")
+        if ev.teleported:
+            self.audio.play("split")
+        elif ev.merged:
+            self.audio.play("merge")
+
+    # ------------------------------------------------------------------ solver
+    def start_solver(self, name: str):
+        if self.job is not None and not self.job.done:
+            return
+        self.restart()
+        self.stats = None
+        self.job = SolverJob(name, self.level.problem, self.heuristic if name == "A*" else None)
+        self.job.start()
+
+    def toggle_pause(self):
+        self.paused = not self.paused
+
+    def toggle_path(self):
+        self.show_path = not self.show_path
+        self.settings.set("show_path", self.show_path)
+
+    def _request_step(self, direction: int):
+        self.step_req = direction
+
+    # ------------------------------------------------------------------ so sánh nhiều thuật toán
+    def open_compare(self):
+        """Mở bảng so sánh: lần đầu thì chạy tất cả solver, các lần sau xem lại kết quả đã có."""
+        if self.level_idx in self.compare_store and self.compare_job is None:
+            self.compare_open = True
+        else:
+            self.start_compare()
+
+    def start_compare(self):
+        if self.compare_job is not None and not self.compare_job.finished:
+            return
+        avail = available_solvers()
+        all_cfgs = compare_configs()
+        configs = [c for c in all_cfgs if avail.get(c.solver)]
+        self.compare_skipped = sorted({c.solver for c in all_cfgs if not avail.get(c.solver)})
+        if not configs:
+            self.toast("No solver is implemented yet", theme.BAD)
+            return
+        self.compare_store.pop(self.level_idx, None)
+        self.compare_job = CompareJob(self.level, configs)
+        self.compare_job_level = self.level_idx
+        self.compare_job.start()
+        self.compare_open = True
+
+    def close_compare(self):
+        if self.compare_job is not None and not self.compare_job.finished:
+            self.compare_job.cancel()
+            self.compare_job = None
+        self.compare_open = False
+
+    def _compare_data(self) -> dict:
+        job = self.compare_job
+        if job is not None:
+            return {
+                "title": self.level.name,
+                "labels": [c.label for c in job.configs],
+                "rows": {r["solver"]: r for r in list(job.results)},
+                "running_label": job.current.label if (job.current and not job.finished) else None,
+                "total": job.total,
+                "skipped": self.compare_skipped,
+            }
+        stored = self.compare_store.get(self.level_idx, {"labels": [], "rows": {}})
+        return {"title": self.level.name, "running_label": None, "total": len(stored["labels"]),
+                "skipped": self.compare_skipped, **stored}
+
+    def _poll_compare(self):
+        job = self.compare_job
+        if job is None or not job.finished:
+            return
+        self.compare_job = None
+        self.compare_store[self.compare_job_level] = {
+            "labels": [c.label for c in job.configs],
+            "rows": {r["solver"]: r for r in job.results},
+        }
+
+    def _replay_row(self, row: dict):
+        """Bấm một dòng trong bảng so sánh: phát lại lời giải của thuật toán đó trên bàn cờ."""
+        self.compare_open = False
+        self.restart()
+        metrics = {
+            "search_time_sec": row["time_ms"] / 1000.0,
+            "peak_memory_kb": row["memory_kb"],
+            "expanded_nodes": row["expanded"],
+            "solution_length": row["length"],
+            "solution_cost": row["cost"],
+        }
+        out = SolveOutcome(row["solver"], row["solver"], list(row["actions"]), metrics)
+        self.stats = out
+        self._begin_replay(out.label, out.actions)
+
+    def _begin_replay(self, label: str, actions: List[str]):
+        self.path_steps = path_steps(self.level.problem, actions)
+        self.replay_done = []
+        self.replay = deque(actions)
+        self.used_solver = True
+        self.replay_total = len(actions)
+        self.replay_label = label
+        self.replay_timer = 0.5
+        self.paused = False
+
+    def _save_compare_csv(self):
+        data = self._compare_data()
+        rows = [data["rows"][l] for l in data["labels"] if l in data["rows"]]
+        if not rows:
+            return
+        safe = "".join(ch if ch.isalnum() else "_" for ch in self.level.name).strip("_")
+        path = Path(__file__).resolve().parents[2] / "results" / f"compare_{safe}.csv"
+        try:
+            write_csv(rows, path)
+            self.toast(f"Saved {path.parent.name}/{path.name}", theme.GOOD, 3.5)
+        except OSError as exc:
+            self.toast(f"Could not save CSV: {exc}", theme.BAD, 4.0)
+
+    def _poll_solver(self):
+        job = self.job
+        if job is None or not job.done:
+            return
+        self.job = None
+        if job.problem is not self.level.problem:  # đã đổi màn trong lúc giải
+            return
+        out = job.outcome
+        self.stats = out
+        self.path_steps = path_steps(self.level.problem, out.actions) if out.found else []
+        self.replay_done = []
+        if out.error:
+            self.toast(f"{job.label} failed: {out.error}", theme.BAD, 5.0)
+        elif not out.found:
+            self.toast(f"{job.label}: no solution found", theme.BAD, 4.0)
+        else:
+            self._begin_replay(job.label, out.actions)
+            self.toast(f"{job.label}: replaying {len(out.actions)} actions", theme.INFO, 3.0)
+
+    def _step_replay(self, dt: float):
+        if not self.replay or self.paused or self.anims:
+            return
+        self.replay_timer -= dt
+        if self.replay_timer > 0:
+            return
+        self._run_replay_action()
+
+    def _process_step_request(self):
+        """Nút / phím ``,`` ``.``: đi một hành động tới hoặc lùi trong replay."""
+        direction, self.step_req = self.step_req, 0
+        if not direction or self.anims:
+            return
+        self.paused = True
+        if direction > 0 and self.replay:
+            self._run_replay_action()
+        elif direction < 0 and self.replay_done:
+            action = self.replay_done.pop()
+            if self.session.undo():
+                self.replay.appendleft(action)
+                self.lost_cells = None
+                self.renderer.set_bridges(self.session.state.bridges_state)
+
+    def _run_replay_action(self):
+        action = self.replay.popleft()
+        step = self.replay_total - len(self.replay)
+        ev = self.do_action(action, from_replay=True)
+        self.replay_timer = 0.12 / self.speed
+        if ev is not None and ev.outcome in (Outcome.MOVED, Outcome.WON, Outcome.SWITCHED):
+            self.replay_done.append(action)
+        if ev is None or ev.outcome in (Outcome.FELL, Outcome.IGNORED, Outcome.BLOCKED):
+            self.replay.clear()
+            self.toast(
+                f"{self.replay_label} returned an illegal action '{action}' at step {step}",
+                theme.BAD, 6.0,
+            )
+        elif not self.replay and ev.outcome != Outcome.WON:
+            self.toast("Replay finished without reaching the goal", theme.BAD, 4.0)
+
+    # ------------------------------------------------------------------ sự kiện
+    def handle(self, event, mouse):
+        if event.type == pygame.QUIT:
+            self.running = False
+            return
+        if event.type == pygame.KEYDOWN:
+            self._key(event)
+            return
+        if self.compare_open:
+            self.compare_view.handle(event, mouse, self._compare_data())
+            return
+        if self.race is not None:
+            if self._camera_event(event, mouse):
+                return
+            for btn in self.race_buttons:
+                if btn.handle(event, mouse):
+                    return
+            return
+        if self.tip is not None and self.btn_tip_ok.handle(event, mouse):
+            return
+        if self._camera_event(event, mouse):
+            return
+        if self.picker_open:
+            if event.type == pygame.MOUSEWHEEL:
+                self.picker_scroll = max(
+                    0.0, min(float(self._picker_max_scroll()), self.picker_scroll - event.y * 70)
+                )
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for key, rect in self._picker_tab_rects().items():
+                    if rect.collidepoint(mouse):
+                        self._set_picker_tab(key)
+                        return
+                if self._picker_view().collidepoint(mouse):
+                    for i, rect in self._picker_cards().items():
+                        if rect.collidepoint(mouse):
+                            self.load_level(i)
+                            return
+                if not self._picker_panel().collidepoint(mouse):
+                    self.picker_open = False
+            return
+        for btn in self._banner_buttons():
+            if btn.handle(event, mouse):
+                return
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for key, rect in self.tab_rects.items():
+                if rect.collidepoint(mouse):
+                    self.panel_tab = key
+                    return
+        for btn in self._main_buttons():
+            if btn.handle(event, mouse):
+                return
+        if self.panel_tab == "play":
+            if self.slider.handle(event, mouse):
+                self.speed = self.slider.value
+                if not self.slider.drag:  # lưu khi thả chuột, không lưu từng điểm khi kéo
+                    self.settings.set("replay_speed", self.speed)
+                return
+            self.heur_seg.handle(event, mouse)
+        else:
+            for tg in self.toggles:
+                if tg.handle(event, mouse):
+                    return
+            if self.tilt_slider.handle(event, mouse):
+                self._set_tilt(self.tilt_slider.value)
+                return
+            if self.volume_slider.handle(event, mouse):
+                self.audio.set_volume(self.volume_slider.value)
+                if not self.volume_slider.drag:  # thả chuột: lưu và phát thử
+                    self.settings.set("volume", self.audio.volume)
+                    self.audio.play("switch")
+                return
+
+    def _key(self, event):
+        k = event.key
+        if k == pygame.K_F11:
+            pygame.display.toggle_fullscreen()
+        elif k == pygame.K_F12:
+            self.save_screenshot()
+        elif k == pygame.K_m:
+            self._set_sound(not self.audio.enabled)
+        elif k == pygame.K_ESCAPE:
+            if self.race is not None:
+                self.exit_race()
+            elif self.compare_open:
+                self.close_compare()
+            self.picker_open = False
+        elif self.race is not None:
+            self._race_key(k)
+        elif self.compare_open:
+            pass
+        elif self.picker_open:
+            self._picker_key(k)
+        elif k in KEY_ACTIONS:
+            self.do_action(KEY_ACTIONS[k])
+        elif k == pygame.K_SPACE:
+            self.do_action("SWITCH")
+        elif k == pygame.K_r:
+            self.restart()
+        elif k in (pygame.K_z, pygame.K_BACKSPACE):
+            self.undo()
+        elif k == pygame.K_n:
+            self.open_picker()
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.tip is not None:
+            self.dismiss_tip()
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.session.status == Status.WON:
+            self.next_level()
+        elif k == pygame.K_p:
+            self.toggle_pause()
+        elif k == pygame.K_v:
+            self.toggle_path()
+        elif k == pygame.K_PERIOD:
+            self._request_step(1)
+        elif k == pygame.K_COMMA:
+            self._request_step(-1)
+        elif k == pygame.K_c:
+            self._reset_camera()
+        elif k == pygame.K_TAB:
+            self.panel_tab = "settings" if self.panel_tab == "play" else "play"
+
+    # ------------------------------------------------------------------ camera
+    def _in_board(self, mouse) -> bool:
+        return mouse[0] < theme.PANEL_RECT.x - 6 and not self.picker_open
+
+    def _camera_event(self, event, mouse) -> bool:
+        """Zoom bằng cuộn chuột, xoay/nghiêng bằng kéo chuột phải, dịch bằng chuột giữa."""
+        if event.type == pygame.MOUSEWHEEL and self._in_board(mouse):
+            self.cam.zoom_by(1.12 ** event.y)
+            return True
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (2, 3) and self._in_board(mouse):
+            self.cam_drag = "rotate" if event.button == 3 else "pan"
+            return True
+        if event.type == pygame.MOUSEBUTTONUP and event.button in (2, 3) and self.cam_drag:
+            self.cam_drag = None
+            return True
+        if event.type == pygame.MOUSEMOTION and self.cam_drag:
+            dx, dy = event.rel
+            if self.cam_drag == "rotate":
+                self.cam.rotate(dx * 0.007, dy * 0.005)
+            else:
+                self.cam.pan[0] += dx
+                self.cam.pan[1] += dy
+            self.cam_dirty = True
+            return True
+        return False
+
+    def _update_camera(self, dt: float) -> None:
+        if not self.picker_open:
+            keys = pygame.key.get_pressed()
+            zoom = (keys[pygame.K_e] - keys[pygame.K_q]) * 1.5 * dt
+            if zoom:
+                self.cam.zoom_by(math.exp(zoom))
+            spin = (keys[pygame.K_RIGHTBRACKET] - keys[pygame.K_LEFTBRACKET]) * 1.3 * dt
+            tilt = (keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]) * 0.9 * dt
+            if spin or tilt:
+                self.cam.rotate(spin, tilt)
+                self.cam_dirty = True
+        if self.cam.update(dt) or self.cam_dirty:
+            self.cam_dirty = False
+            self.renderer.set_camera(self.cam)
+            if self.race is not None:
+                self.race.set_camera(self.cam)
+
+    # ------------------------------------------------------------------ cập nhật
+    def update(self, dt: float, mouse):
+        self._layout_bottom_boxes()
+        for btn in self._main_buttons() + self._banner_buttons():
+            btn.update(dt, mouse)
+        if self.panel_tab == "settings":
+            for tg in self.toggles:
+                tg.update(dt, mouse)
+            self.btn_reset_progress.label = (
+                "Click again to confirm" if pygame.time.get_ticks() / 1000.0 < self.reset_armed_until else "Reset progress"
+            )
+        self._avail_timer -= dt
+        if self._avail_timer <= 0:
+            self.available = available_solvers()
+            self._avail_timer = 2.0
+        busy_job = self.job is not None and not self.job.done
+        for name, btn in self.solver_buttons.items():
+            ok = self.available.get(name, False)
+            btn.enabled = ok and not busy_job
+            btn.sublabel = SOLVER_SUB[name] if ok else "not implemented"
+        self.btn_undo.enabled = self.session.can_undo
+        self.btn_pause.enabled = bool(self.replay)
+        self.btn_pause.label = "Resume" if (self.paused and self.replay) else "Pause"
+        self.btn_fwd.enabled = bool(self.replay)
+        self.btn_back.enabled = bool(self.replay_done)
+        self.btn_path.enabled = bool(self.path_steps)
+        self.btn_path.label = "Path: on" if self.show_path else "Path: off"
+
+        self._poll_solver()
+        self._poll_compare()
+        if self.race is not None:
+            self.race.update(dt, self.speed, self.race_paused)
+            for btn in self.race_buttons:
+                btn.update(dt, mouse)
+        self._maybe_show_tip()
+        if self.tip is not None:
+            self.btn_tip_ok.update(dt, mouse)
+            if self.session.moves - self.tip_start_moves >= 2 or not self.settings.show_tips:
+                self.dismiss_tip(chain=False)  # người chơi đã bắt đầu chơi: không bật thẻ khác giữa chừng
+        compare_busy = self.compare_job is not None
+        data = self._compare_data() if self.compare_open else {"rows": {}}
+        self.compare_view.update(dt, mouse, compare_busy, bool(data["rows"]))
+        self.btn_compare.enabled = not compare_busy and not (self.job is not None and not self.job.done)
+        self.btn_compare.label = "Last comparison" if self.level_idx in self.compare_store else "Compare all"
+        self._update_camera(dt)
+        self.renderer.update(dt)
+
+        replaying = bool(self.replay)
+        speed = self.speed if replaying else 1.0
+        if self.anims:
+            anim = self.anims[0]
+            if not anim.started:
+                anim.started = True
+                if anim.on_start:
+                    anim.on_start()
+            anim.t += dt * speed
+            if anim.t >= anim.dur:
+                self.anims.popleft()
+                if anim.on_finish:
+                    anim.on_finish()
+        elif self.queued:
+            action, self.queued = self.queued, None
+            self.do_action(action)
+        self._process_step_request()
+        self._step_replay(dt)
+
+        for k in self.key_flash:
+            self.key_flash[k] = max(0.0, self.key_flash[k] - dt * 4.0)
+        for t in self.toasts:
+            t["age"] += dt
+        self.toasts = [t for t in self.toasts if t["age"] < t["ttl"]]
+
+    # ------------------------------------------------------------------ vẽ
+    def draw_piece(self, surf, piece, **kw):
+        self.renderer.draw_piece(
+            surf, piece["cells"], piece["kind"], piece["height"],
+            active=piece["active"], **kw,
+        )
+
+    def _draw_pieces(self, surf):
+        rd = self.renderer
+        st = self.session.state
+        if self.anims:
+            anim = self.anims[0]
+            p = min(1.0, anim.t / anim.dur)
+            for s in anim.statics:
+                self.draw_piece(surf, s)
+            if anim.kind == "roll":
+                self.draw_piece(surf, anim.piece, roll=(anim.direction, smoothstep(p) * math.pi / 2))
+            elif anim.kind == "fall":
+                self.draw_piece(surf, anim.piece, dz=-(p ** 2) * 6.0, alpha=max(0.0, 1.0 - p ** 1.4))
+            elif anim.kind == "sink":
+                pc = anim.piece
+                rd.draw_swallow(surf, pc["cells"], pc["kind"], pc["height"], p)
+            elif anim.kind == "spawn":
+                e = smoothstep(p)
+                for piece in anim.pieces:
+                    self.draw_piece(surf, piece, dz=(1 - e) * 3.0, alpha=smoothstep(min(1.0, p * 2)))
+            return
+        if self.session.status == Status.WON:
+            return
+        pieces = pieces_of(st)
+        if self.session.status == Status.LOST and self.lost_cells is not None:
+            pieces = [pc for pc in pieces if pc["cells"] != self.lost_cells]
+        if (self.session.status == Status.PLAYING and not self.replay and not self.picker_open
+                and self.settings.show_floor_arrows):
+            controlled = (st.get_occupied_cells()[st.active_block],) if st.is_split else st.get_occupied_cells()
+            rd.draw_direction_hints(surf, controlled, self.key_flash)
+        for pc in sorted(pieces, key=lambda q: rd.iso.order(*q["cells"][0])):
+            if pc["kind"] == "cube" and pc["active"] and len(pieces) == 2:
+                rd.draw_floor_ring(surf, pc["cells"][0], theme.TEXT)
+            self.draw_piece(surf, pc)
+
+    def _draw_hud(self, surf):
+        lv = self.level
+        name = self._level_title(self.level_idx)
+        draw_text(surf, name, theme.font(46, True), theme.TEXT, (56, 40))
+        chip_col = theme.group_color(lv.group)
+        label = lv.group.upper()
+        f = theme.font(17, True)
+        tw = f.size(label)[0]
+        chip = pygame.Rect(58, 104, tw + 28, 30)
+        rrect(surf, chip, (*chip_col, 46), 15, chip_col, 2)
+        draw_text(surf, label, f, chip_col, chip.center, "center")
+        for i, line in enumerate(wrap_text(lv.description, theme.font(22), 720)[:3]):
+            draw_text(surf, line, theme.font(22), theme.TEXT_DIM, (58, 150 + i * 30))
+
+    def _draw_compass(self, surf):
+        """Thẻ chỉ hướng: mỗi phím lăn khối về hướng nào trên màn hình."""
+        card = pygame.Rect(28, 826, 252, 224)
+        if not self.settings.show_compass:
+            self._draw_camera_help(surf, 28)
+            return
+        rrect(surf, card, (*theme.PANEL, 214), 20, theme.PANEL_EDGE, 2)
+        draw_text(surf, "MOVE KEYS", theme.font(14, True), theme.TEXT_FAINT, (card.x + 18, card.y + 14))
+        cx, cy = card.centerx, card.y + 130
+        pygame.draw.circle(surf, theme.TEXT_FAINT, (cx, cy), 5)
+        labels = {"U": "W  ↑", "D": "S  ↓", "L": "A  ←", "R": "D  →"}
+        for key, label in labels.items():
+            dx, dy = self.renderer.screen_dir(key)
+            hot = self.key_flash[key]
+            col = theme.mix(theme.TEXT_DIM, theme.ACCENT, min(1.0, 0.45 + hot))
+            tip = (cx + dx * 46, cy + dy * 46)
+            pygame.draw.line(surf, col, (cx, cy), tip, 4)
+            px, py = -dy, dx
+            head = [
+                (tip[0] + dx * 12, tip[1] + dy * 12),
+                (tip[0] + px * 8, tip[1] + py * 8),
+                (tip[0] - px * 8, tip[1] - py * 8),
+            ]
+            pygame.draw.polygon(surf, col, head)
+            cap = pygame.Rect(0, 0, 64, 32)
+            cap.center = (cx + dx * 80, cy + dy * 80)
+            fill = theme.mix(theme.CARD, theme.ACCENT_DARK, hot)
+            rrect(surf, cap, fill, 9, col, 2)
+            draw_text(surf, label, theme.font(17, True), theme.TEXT if hot < 0.5 else (28, 22, 8), cap.center, "center")
+
+        self._draw_camera_help(surf, card.right + 14)
+
+    def _draw_camera_help(self, surf, x: int):
+        if not self.settings.show_camera_help:
+            return
+        cam_card = pygame.Rect(x, 826 + 224 - 98, 372, 98)
+        rrect(surf, cam_card, (*theme.PANEL, 214), 20, theme.PANEL_EDGE, 2)
+        draw_text(surf, "CAMERA", theme.font(14, True), theme.TEXT_FAINT, (cam_card.x + 18, cam_card.y + 12))
+        rows = [
+            ("Zoom", "Q / E  or  mouse wheel"),
+            ("Rotate / tilt", "right-drag   or   [ ]  PgUp PgDn"),
+            ("Pan", "middle-drag        Reset:  C"),
+        ]
+        for i, (k, v) in enumerate(rows):
+            y = cam_card.y + 34 + i * 20
+            draw_text(surf, k, theme.font(15, True), theme.TEXT_DIM, (cam_card.x + 18, y))
+            draw_text(surf, v, theme.font(15), theme.TEXT, (cam_card.x + 122, y))
+
+    def _draw_toasts(self, surf):
+        y = 40
+        for t in self.toasts:
+            life = t["ttl"] - t["age"]
+            a = int(255 * max(0.0, min(1.0, life / 0.4, t["age"] / 0.15)))
+            f = theme.font(24, True)
+            w = f.size(t["text"])[0] + 56
+            r = pygame.Rect(0, 0, w, 48)
+            r.topright = (theme.BOARD_AREA.right - 36, y)
+            rrect(surf, r, (*theme.PANEL, int(a * 0.92)), 24, (*t["color"], a), 2)
+            draw_text(surf, t["text"], f, t["color"], r.center, "center", alpha=a)
+            y += 60
+
+    def _draw_banner(self, surf):
+        status = self.session.status
+        if self.anims or status == Status.PLAYING:
+            return
+        r = self.banner_rect
+        rrect(surf, r, (*theme.PANEL, 238), 22, theme.PANEL_EDGE, 2)
+        if status == Status.WON:
+            draw_text(surf, "Stage clear!", theme.font(46, True), theme.GOOD, (r.centerx, r.y + 36), "center")
+            n = self.session.moves
+            draw_text(
+                surf, f"Solved in {n} move{'s' if n != 1 else ''}", theme.font(24),
+                theme.TEXT_DIM, (r.centerx, r.y + 82), "center",
+            )
+        else:
+            draw_text(surf, "You fell!", theme.font(46, True), theme.BAD, (r.centerx, r.y + 36), "center")
+            draw_text(
+                surf, self.session.fail_reason, theme.font(22), theme.TEXT_DIM,
+                (r.centerx, r.y + 82), "center",
+            )
+        for btn in self._banner_buttons():
+            btn.draw(surf)
+
+    def _stat_rows(self):
+        s = self.stats
+        if s is None or not s.found:
+            return None
+        m = s.metrics
+        t = m.get("search_time_sec", 0.0)
+        kb = m.get("peak_memory_kb", 0.0)
+        return [
+            ("Solution length", f"{m.get('solution_length', len(s.actions))} actions"),
+            ("Solution cost", f"{m.get('solution_cost', '-')}"),
+            ("Expanded nodes", f"{m.get('expanded_nodes', 0):,}"),
+            ("Search time", f"{t * 1000:.2f} ms" if t < 1 else f"{t:.3f} s"),
+            ("Peak memory", f"{kb / 1024:.2f} MB" if kb >= 1024 else f"{kb:.1f} KB"),
+        ]
+
+    def _draw_panel(self, surf, mouse):
+        pr = theme.PANEL_RECT
+        rrect(surf, pr, (*theme.PANEL, 232), 26, theme.PANEL_EDGE, 2)
+        x0, w = self.x0, self.pw
+        draw_text(surf, "BLOXORZ", theme.font(58, True), theme.ACCENT, (x0, 40))
+        draw_text(surf, "Project 1", theme.font(16), theme.TEXT_DIM, (x0 + w, 64), "topright")
+        draw_text(surf, "Fundamentals of AI", theme.font(16), theme.TEXT_DIM, (x0 + w, 84), "topright")
+        for key, label in (("play", "PLAY"), ("settings", "SETTINGS")):
+            rect = self.tab_rects[key]
+            active = key == self.panel_tab
+            hot = rect.collidepoint(mouse)
+            rrect(
+                surf, rect, theme.mix(theme.CARD, theme.ACCENT_DARK, 0.9 if active else (0.2 if hot else 0.0)), 12,
+                theme.ACCENT if active else theme.PANEL_EDGE, 2,
+            )
+            draw_text(surf, label, theme.font(18, True), (28, 22, 8) if active else theme.TEXT_DIM, rect.center, "center")
+        if self.panel_tab == "settings":
+            self._draw_settings_tab(surf, mouse)
+        else:
+            self._draw_play_tab(surf, mouse)
+        hint = "Arrows / WASD roll   Space swap cube   Z undo   R restart   N stages   Tab settings   F12 screenshot"
+        for i, line in enumerate(wrap_text(hint, theme.font(15), w)):
+            draw_text(surf, line, theme.font(15), theme.TEXT_FAINT, (x0 + 2, 1004 + i * 19))
+
+    def _draw_settings_tab(self, surf, mouse):
+        x0, w = self.x0, self.pw
+        for text, y in self.settings_labels:
+            draw_text(surf, text, theme.font(14, True), theme.TEXT_FAINT, (x0 + 2, y))
+        for tg in self.toggles:
+            tg.draw(surf)
+        self.tilt_slider.draw(surf)
+        self.volume_slider.draw(surf)
+        for b in (self.btn_cam_reset, self.btn_tips_again, self.btn_shot, self.btn_reset_progress):
+            b.draw(surf)
+        draw_text(surf, "Settings are saved automatically.", theme.font(15), theme.TEXT_FAINT, (x0 + 2, 950))
+
+    def _draw_play_tab(self, surf, mouse):
+        x0, w = self.x0, self.pw
+        # thẻ màn chơi
+        card = pygame.Rect(x0, 162, w, 172)
+        rrect(surf, card, theme.CARD, 18)
+        lv = self.level
+        draw_text(surf, "MOVES", theme.font(15, True), theme.TEXT_FAINT, (card.right - 24, card.y + 18), "topright")
+        draw_text(surf, str(self.session.moves), theme.font(60, True), theme.TEXT, (card.right - 24, card.y + 34), "topright")
+        draw_text(surf, lv.name, theme.font(30, True), theme.TEXT, (card.x + 24, card.y + 22))
+        col = theme.group_color(lv.group)
+        draw_text(surf, lv.group.upper(), theme.font(16, True), col, (card.x + 24, card.y + 66))
+        for i, line in enumerate(wrap_text(lv.description, theme.font(17), card.w - 48)[:3]):
+            draw_text(surf, line, theme.font(17), theme.TEXT_DIM, (card.x + 24, card.y + 94 + i * 21))
+
+        for b in (self.btn_new, self.btn_restart, self.btn_undo):
+            b.draw(surf)
+
+        draw_text(surf, "SOLVERS", theme.font(15, True), theme.TEXT_FAINT, (x0 + 2, 424))
+        self.btn_compare.draw(surf)
+        for b in self.solver_buttons.values():
+            b.draw(surf)
+
+        draw_text(surf, "A* HEURISTIC", theme.font(14, True), theme.TEXT_FAINT, (x0 + 2, 614))
+        self.heur_seg.draw(surf)
+        self.slider.draw(surf)
+        self.btn_back.draw(surf)
+        self.btn_pause.draw(surf)
+        self.btn_fwd.draw(surf)
+        if self.replay:
+            done = self.replay_total - len(self.replay)
+            draw_text(
+                surf, f"{self.replay_label}: step {done}/{self.replay_total}",
+                theme.font(16), theme.INFO, (x0 + 2, 776),
+            )
+
+        # thẻ số liệu
+        box = self.stats_box
+        rrect(surf, box, theme.CARD, 18)
+        if self.job is not None and not self.job.done:
+            ang = pygame.time.get_ticks() / 140
+            c = (box.x + 38, box.y + 36)
+            for k in range(8):
+                a = ang + k * math.tau / 8
+                pygame.draw.circle(
+                    surf, theme.mix(theme.CARD, theme.ACCENT, (k + 1) / 8),
+                    (int(c[0] + 14 * math.cos(a)), int(c[1] + 14 * math.sin(a))), 3,
+                )
+            draw_text(surf, f"{self.job.label} is searching...", theme.font(22, True), theme.TEXT, (box.x + 70, box.y + 22))
+        elif self.stats is None:
+            draw_text(surf, "Solver results", theme.font(22, True), theme.TEXT, (box.x + 24, box.y + 18))
+            for i, line in enumerate(wrap_text(
+                "Pick BFS, DFS, UCS or A* to solve this stage and watch the solution replay, or Compare all to race them.",
+                theme.font(17), box.w - 48,
+            )):
+                draw_text(surf, line, theme.font(17), theme.TEXT_DIM, (box.x + 24, box.y + 56 + i * 24))
+        elif self.stats.error:
+            draw_text(surf, f"{self.stats.label} crashed", theme.font(22, True), theme.BAD, (box.x + 24, box.y + 18))
+            for i, line in enumerate(wrap_text(self.stats.error, theme.font(16), box.w - 48)[:4]):
+                draw_text(surf, line, theme.font(16), theme.TEXT_DIM, (box.x + 24, box.y + 56 + i * 22))
+        elif not self.stats.found:
+            draw_text(surf, self.stats.label, theme.font(22, True), theme.TEXT, (box.x + 24, box.y + 18))
+            draw_text(surf, "No solution found", theme.font(20), theme.BAD, (box.x + 24, box.y + 56))
+        else:
+            draw_text(surf, self.stats.label, theme.font(22, True), theme.ACCENT, (box.x + 24, box.y + 16))
+            self.btn_path.draw(surf)
+            for i, (k, v) in enumerate(self._stat_rows()):
+                y = box.y + 52 + i * 27
+                draw_text(surf, k, theme.font(18), theme.TEXT_DIM, (box.x + 24, y))
+                draw_text(surf, v, theme.mono(18, True), theme.TEXT, (box.right - 24, y), "topright")
+
+    # ------------------------------------------------------------------ Race: hai thuật toán cạnh nhau
+    def start_race(self, row_a: dict, row_b: dict):
+        self.compare_open = False
+        self.restart()
+        self.tip = None
+        self.race = Race(self.level, [row_a, row_b], self.cam)
+        self.race_paused = False
+
+    def exit_race(self):
+        self.race = None
+        self.compare_open = self.level_idx in self.compare_store  # quay lại bảng so sánh
+
+    def restart_race(self):
+        if self.race is not None:
+            self.race.restart()
+            self.race_paused = False
+
+    def toggle_race_pause(self):
+        self.race_paused = not self.race_paused
+
+    def _race_key(self, k: int):
+        if k == pygame.K_SPACE:
+            self.toggle_race_pause()
+        elif k == pygame.K_r:
+            self.restart_race()
+        elif k == pygame.K_v:
+            self.toggle_path()
+
+    def _draw_race_panel(self, surf):
+        """Panel bên phải khi đua: số liệu của hai thuật toán đặt cạnh nhau (nhìn là so sánh được ngay)."""
+        pr = theme.PANEL_RECT
+        rrect(surf, pr, (*theme.PANEL, 232), 26, theme.PANEL_EDGE, 2)
+        x0, w = self.x0, self.pw
+        draw_text(surf, "RACE", theme.font(58, True), theme.ACCENT, (x0, 40))
+        draw_text(surf, "Same stage, two algorithms", theme.font(18), theme.TEXT_DIM, (x0 + 4, 112))
+        from App.GUI.compare_view import fmt_value
+
+        rows = (
+            ("Actions", "length", "{}"), ("Moves", "moves", "{}"), ("Cost", "cost", "{}"),
+            ("Expanded nodes", "expanded", None), ("Search time", "time_ms", None), ("Peak memory", "memory_kb", None),
+        )
+        for i, lane in enumerate(self.race.state.lanes):
+            card = pygame.Rect(x0, 160 + i * 330, w, 310)
+            col = LANE_COLORS[i]
+            rrect(surf, card, theme.CARD, 18, col, 2)
+            draw_text(surf, lane.label, theme.font(34, True), col, (card.x + 24, card.y + 18))
+            draw_text(
+                surf, f"step {lane.index} / {lane.total}", theme.font(18), theme.TEXT_DIM,
+                (card.right - 24, card.y + 28), "topright",
+            )
+            for j, (name, key, fmt) in enumerate(rows):
+                v = lane.row.get(key)
+                text = fmt.format(v) if fmt else fmt_value(key, v)
+                y = card.y + 80 + j * 36
+                draw_text(surf, name, theme.font(18), theme.TEXT_DIM, (card.x + 24, y))
+                draw_text(surf, text, theme.mono(19, True), theme.TEXT, (card.right - 24, y), "topright")
+        for i, line in enumerate(wrap_text("Space pause   R restart   V path   Esc leave", theme.font(15), w)):
+            draw_text(surf, line, theme.font(15), theme.TEXT_FAINT, (x0 + 2, 1004 + i * 19))
+    def _draw_race(self, mouse):
+        surf = self.screen
+        race = self.race
+        surf.blit(self.bg, (0, 0))
+        a, b = race.state.lanes
+        draw_text(surf, f"{a.label}  vs  {b.label}", theme.font(44, True), theme.TEXT, (56, 36))
+        draw_text(surf, f"Race on {self._level_title(self.level_idx)}", theme.font(22), theme.TEXT_DIM, (58, 92))
+        race.draw(surf, mouse, self.show_path)
+        self._draw_toasts(surf)
+        self._draw_race_panel(surf)
+        if race.state.done:
+            r = pygame.Rect(0, 0, 1000, 50)
+            r.midtop = (theme.BOARD_AREA.centerx, 906)
+            rrect(surf, r, (*theme.PANEL, 240), 25, theme.GOOD, 2)
+            draw_text(surf, race.state.headline(), theme.font(23, True), theme.GOOD, r.center, "center")
+        self.race_buttons[0].label = "Resume  (Space)" if self.race_paused else "Pause  (Space)"
+        for btn in self.race_buttons:
+            btn.draw(surf)
+    # ------------------------------------------------------------------ gợi ý hướng dẫn
+    def _maybe_show_tip(self):
+        """Hiện gợi ý đến lượt (nếu có) khi màn mới nạp xong và không có lớp phủ nào đang mở."""
+        if not self._tip_pending or self.tip is not None:
+            return
+        if self.picker_open or self.compare_open or self.session.status != Status.PLAYING:
+            return
+        self._tip_pending = False
+        if not self.settings.show_tips:
+            return
+        key = tip_for(self.level, self.settings.tips_seen)
+        if key is not None:
+            self.tip = key
+            self.tip_start_moves = self.session.moves
+            self.settings.mark_tip_seen(key)
+
+    def dismiss_tip(self, chain: bool = True):
+        """Đóng thẻ gợi ý. ``chain``: nếu màn còn gợi ý khác đến lượt thì hiện tiếp ngay."""
+        self.tip = None
+        self._tip_pending = chain
+
+    def _draw_tip(self, surf):
+        if self.tip is None or self.session.status != Status.PLAYING or self.compare_open:
+            return
+        title, body = TIPS[self.tip]
+        r = self.tip_rect
+        rrect(surf, r, theme.PANEL, 22, theme.ACCENT, 2)
+        draw_text(surf, "NEW", theme.font(14, True), theme.ACCENT_DARK, (r.x + 28, r.y + 16))
+        draw_text(surf, title, theme.font(28, True), theme.ACCENT, (r.x + 28, r.y + 34))
+        for i, line in enumerate(wrap_text(body, theme.font(18), r.w - 56)[:5]):
+            draw_text(surf, line, theme.font(18), theme.TEXT, (r.x + 28, r.y + 72 + i * 23))
+        self.btn_tip_ok.draw(surf)
+
+    # ------------------------------------------------------------------ chọn màn
+    PICK_COLS, PICK_W, PICK_H, PICK_GAP = 5, 320, 212, 22
+    TABS = (("classic", "CLASSIC"), ("custom", "CUSTOM"))
+
+    def _tab_ids(self, tab: Optional[str] = None) -> List[int]:
+        tab = tab or self.picker_tab
+        return [i for i, lv in enumerate(self.levels) if lv.section == tab]
+
+    def _section_position(self, idx: int) -> int:
+        """Số thứ tự (từ 1) của màn trong nhóm của nó (Classic hoặc Custom)."""
+        ids = self._tab_ids(self.levels[idx].section)
+        return ids.index(idx) + 1
+
+    def _level_title(self, idx: int) -> str:
+        lv = self.levels[idx]
+        return lv.name if lv.section == "classic" else f"{self._section_position(idx)}.  {lv.name}"
+
+    @staticmethod
+    def _level_tags(lv: Level) -> str:
+        pb = lv.problem
+        tags = []
+        if any(t == TileType.FRAGILE for t in pb.grid.values()):
+            tags.append("FRAGILE")
+        if pb.bridge_indices:
+            tags.append("BRIDGES")
+        if any(sw.split_targets for sw in pb.switches.values()):
+            tags.append("SPLIT")
+        if any(sw.split_targets is None for sw in pb.switches.values()):
+            tags.append("SWITCHES")
+        return "  \u00b7  ".join(tags) if tags else "PLAIN"
+
+    def _picker_panel(self) -> pygame.Rect:
+        return pygame.Rect(80, 60, theme.WIDTH - 160, theme.HEIGHT - 120)
+
+    def _picker_view(self) -> pygame.Rect:
+        panel = self._picker_panel()
+        return pygame.Rect(panel.x + 20, panel.y + 176, panel.w - 40, panel.h - 176 - 24)
+
+    def _picker_tab_rects(self) -> Dict[str, pygame.Rect]:
+        panel = self._picker_panel()
+        w, h, gap = 300, 46, 16
+        x = panel.centerx - (len(self.TABS) * w + (len(self.TABS) - 1) * gap) // 2
+        return {
+            key: pygame.Rect(x + i * (w + gap), panel.y + 80, w, h)
+            for i, (key, _) in enumerate(self.TABS)
+        }
+
+    def _picker_max_scroll(self) -> int:
+        n = len(self._tab_ids())
+        rows = (n + self.PICK_COLS - 1) // self.PICK_COLS
+        content = rows * (self.PICK_H + self.PICK_GAP) - self.PICK_GAP
+        return max(0, content - self._picker_view().h)
+
+    def _picker_cards(self) -> Dict[int, pygame.Rect]:
+        """Hình chữ nhật (toạ độ màn hình, đã trừ cuộn) của từng thẻ, khoá là chỉ số màn toàn cục."""
+        view = self._picker_view()
+        total = self.PICK_COLS * self.PICK_W + (self.PICK_COLS - 1) * self.PICK_GAP
+        x = view.centerx - total // 2
+        return {
+            gid: pygame.Rect(
+                x + (pos % self.PICK_COLS) * (self.PICK_W + self.PICK_GAP),
+                view.y + (pos // self.PICK_COLS) * (self.PICK_H + self.PICK_GAP) - int(self.picker_scroll),
+                self.PICK_W, self.PICK_H,
+            )
+            for pos, gid in enumerate(self._tab_ids())
+        }
+
+    def _picker_scroll_to(self, gid: int) -> None:
+        view = self._picker_view()
+        ids = self._tab_ids()
+        pos = ids.index(gid) if gid in ids else 0
+        top = (pos // self.PICK_COLS) * (self.PICK_H + self.PICK_GAP)
+        if top < self.picker_scroll:
+            self.picker_scroll = float(top)
+        elif top + self.PICK_H > self.picker_scroll + view.h:
+            self.picker_scroll = float(top + self.PICK_H - view.h)
+        self.picker_scroll = max(0.0, min(float(self._picker_max_scroll()), self.picker_scroll))
+
+    def _set_picker_tab(self, tab: str) -> None:
+        if tab == self.picker_tab:
+            return
+        self.picker_tab = tab
+        self.picker_scroll = 0.0
+        ids = self._tab_ids()
+        if self.picker_sel not in ids and ids:
+            self.picker_sel = ids[0]
+
+    def _picker_key(self, k: int) -> None:
+        ids = self._tab_ids()
+        n = len(ids)
+        if k == pygame.K_TAB:
+            keys = [key for key, _ in self.TABS]
+            self._set_picker_tab(keys[(keys.index(self.picker_tab) + 1) % len(keys)])
+            return
+        pos = ids.index(self.picker_sel) if self.picker_sel in ids else 0
+        step = {
+            pygame.K_LEFT: -1, pygame.K_RIGHT: 1,
+            pygame.K_UP: -self.PICK_COLS, pygame.K_DOWN: self.PICK_COLS,
+        }.get(k)
+        if step is not None:
+            self.picker_sel = ids[max(0, min(n - 1, pos + step))]
+            self._picker_scroll_to(self.picker_sel)
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self.load_level(self.picker_sel)
+        elif pygame.K_1 <= k <= pygame.K_9 and k - pygame.K_1 < n:
+            self.load_level(ids[k - pygame.K_1])
+    def _thumb(self, i: int, size) -> pygame.Surface:
+        if i in self.thumbs:
+            return self.thumbs[i]
+        # Cùng bộ vẽ isometric với bàn chơi, thu nhỏ vào ô ảnh: bố cục, cầu và công tắc giống hệt khi chơi.
+        surf = pygame.Surface(size, pygame.SRCALPHA)
+        rd = BoardRenderer(
+            self.levels[i], area=pygame.Rect(8, 6, size[0] - 16, size[1] - 12), cam=Camera(), min_fit=4.0
+        )
+        rd.draw_board(surf, show_hints=False)
+        self.thumbs[i] = surf
+        return surf
+
+    def _draw_picker(self, surf, mouse):
+        dim = pygame.Surface((theme.WIDTH, theme.HEIGHT), pygame.SRCALPHA)
+        dim.fill((6, 8, 16, 214))
+        surf.blit(dim, (0, 0))
+        panel = self._picker_panel()
+        rrect(surf, panel, theme.PANEL, 28, theme.PANEL_EDGE, 2)
+        draw_text(surf, "Select a stage", theme.font(48, True), theme.TEXT, (panel.centerx, panel.y + 42), "center")
+        for key, label in self.TABS:
+            rect = self._picker_tab_rects()[key]
+            ids = self._tab_ids(key)
+            cleared = sum(1 for i in ids if self.progress.is_cleared(self.levels[i].name))
+            active = key == self.picker_tab
+            hot = rect.collidepoint(mouse)
+            rrect(
+                surf, rect, theme.mix(theme.CARD, theme.ACCENT_DARK, 0.9 if active else (0.25 if hot else 0.0)), 14,
+                theme.ACCENT if active else theme.PANEL_EDGE, 2,
+            )
+            draw_text(
+                surf, f"{label}   {cleared}/{len(ids)}", theme.font(21, True),
+                (28, 22, 8) if active else theme.TEXT_DIM, rect.center, "center",
+            )
+        draw_text(
+            surf, "click or arrows + Enter   -   Tab switches section   -   wheel to scroll   -   Esc to close",
+            theme.font(18), theme.TEXT_DIM, (panel.centerx, panel.y + 148), "center",
+        )
+        view = self._picker_view()
+        surf.set_clip(view)
+        view_mouse = view.collidepoint(mouse)
+        for i, rect in self._picker_cards().items():
+            if rect.bottom < view.y or rect.y > view.bottom:
+                continue
+            lv = self.levels[i]
+            hot = view_mouse and rect.collidepoint(mouse)
+            col = theme.group_color(lv.group)
+            selected = i == self.picker_sel or i == self.level_idx
+            rrect(surf, rect, theme.CARD_HI if hot else theme.CARD, 18, col if (hot or selected) else theme.PANEL_EDGE, 2)
+            thumb = self._thumb(i, (rect.w - 24, 118))
+            surf.blit(thumb, (rect.x + 12, rect.y + 10))
+            draw_text(surf, self._level_title(i), theme.font(23, True), theme.TEXT, (rect.x + 18, rect.y + 138))
+            chip = self._level_tags(lv) if lv.section == "classic" else lv.group.upper()
+            draw_text(surf, chip, theme.font(13, True), col, (rect.x + 20, rect.y + 177))
+            best = self.progress.best(lv.name)
+            if best is not None:
+                draw_text(surf, f"CLEARED  -  best {best}", theme.font(13, True), theme.GOOD, (rect.right - 18, rect.y + 192), "topright")
+        surf.set_clip(None)
+        max_scroll = self._picker_max_scroll()
+        if max_scroll:
+            track = pygame.Rect(view.right - 8, view.y, 6, view.h)
+            rrect(surf, track, (40, 48, 70), 3)
+            bar_h = max(40, int(view.h * view.h / (view.h + max_scroll)))
+            bar_y = view.y + int((view.h - bar_h) * self.picker_scroll / max_scroll)
+            rrect(surf, pygame.Rect(track.x, bar_y, 6, bar_h), theme.TEXT_DIM, 3)
+    def _draw_tooltip(self, surf, mouse):
+        for btn in (self.btn_back, self.btn_fwd):
+            if btn.enabled and btn.tooltip and btn.rect.collidepoint(mouse):
+                f = theme.font(16)
+                r = pygame.Rect(0, 0, f.size(btn.tooltip)[0] + 24, 34)
+                r.midbottom = (btn.rect.centerx, btn.rect.y - 8)
+                rrect(surf, r, (14, 17, 28, 240), 9, theme.PANEL_EDGE, 2)
+                draw_text(surf, btn.tooltip, f, theme.TEXT, r.center, "center")
+                return
+        for name, btn in self.solver_buttons.items():
+            if not self.available.get(name) and btn.rect.collidepoint(mouse):
+                module = f"App/Solvers/{name.replace('*', '_star').replace('A_star', 'A_star')}_solver.py"
+                text = f"{name} solver not found - add {module} (class {name}Solver)"
+                if name == "A*":
+                    text = "A* solver not found - App/Solvers/A_star_solver.py (class AstarSolver)"
+                f = theme.font(17)
+                r = pygame.Rect(0, 0, f.size(text)[0] + 28, 40)
+                r.topright = (mouse[0], mouse[1] + 24)
+                r.right = min(r.right, theme.WIDTH - 12)
+                rrect(surf, r, (14, 17, 28, 240), 10, theme.PANEL_EDGE, 2)
+                draw_text(surf, text, f, theme.TEXT, r.center, "center")
+                return
+
+    def draw(self, mouse):
+        if self.race is not None:
+            self._draw_race(mouse)
+            return
+        surf = self.screen
+        surf.blit(self.bg, (0, 0))
+        self._draw_hud(surf)
+        self.renderer.draw_board(surf)
+        self.renderer.draw_glows(surf)
+        if self.settings.show_link_lines and self.link_segs:
+            self.renderer.draw_link_lines(surf, self.link_segs)
+        if self.show_path and self.path_steps:
+            done = len(self.replay_done) if (self.replay or self.replay_done) else None
+            self.renderer.draw_path(surf, self.path_steps, done)
+        self._draw_pieces(surf)
+        self.renderer.draw_particles(surf)
+        self._draw_compass(surf)
+        self._draw_toasts(surf)
+        self._draw_panel(surf, mouse)
+        self._draw_banner(surf)
+        self._draw_tip(surf)
+        if self.picker_open:
+            self._draw_picker(surf, mouse)
+        if self.compare_open:
+            self.compare_view.draw(surf, mouse, self._compare_data())
+        self._draw_tooltip(surf, mouse)
+
+    # ------------------------------------------------------------------ vòng lặp
+    def run(self):
+        while self.running:
+            focused = pygame.display.get_active()
+            dt = min(self.clock.tick(60 if focused else 10) / 1000.0, 0.05)
+            mouse = pygame.mouse.get_pos()
+            for event in pygame.event.get():
+                self.handle(event, mouse)
+            self.update(dt, mouse)
+            self.draw(mouse)
+            pygame.display.flip()
+        pygame.quit()
+
+
+def main(argv=None) -> None:
+    argv = list(sys.argv[1:] if argv is None else argv)
+    # python play.py [classic|custom] [số màn]: số màn tính trong nhóm đã chọn (mặc định: nhóm Classic)
+    section, number = "classic", 1
+    for a in argv:
+        if a.isdigit():
+            number = int(a)
+        elif a.lower() in ("classic", "custom", "ours"):
+            section = "custom" if a.lower() in ("custom", "ours") else "classic"
+    app = App(0)
+    ids = [i for i, lv in enumerate(app.levels) if lv.section == section] or [0]
+    app.load_level(ids[max(0, min(number - 1, len(ids) - 1))])
+    app.run()
+
+
+if __name__ == "__main__":
+    main()

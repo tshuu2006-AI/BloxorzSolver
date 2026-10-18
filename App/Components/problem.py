@@ -94,6 +94,12 @@ class Problem:
             return None
         new_orient, new_b1, new_b2 = res
 
+        # 1b. Khối đơn 1x1x1 lăn vào ô đích sẽ rơi xuống hố và thua
+        if s.is_split:
+            moved = new_b1 if s.active_block == 0 else new_b2
+            if moved == self.goal_pos:
+                return None
+
         # 2. Xử lý hợp nhất (merge) nếu đang SPLIT mà 2 khối đứng cạnh nhau
         if new_orient == Orientation.SPLIT:
             merge_res = self._check_merge(new_b1, new_b2)
@@ -104,19 +110,35 @@ class Problem:
         if not self._is_supported(new_orient, new_b1, new_b2, s.bridges_state):
             return None
 
-        # 4. Kích hoạt switch (nếu dẫm lên)
+        # 4. Kích hoạt switch (nếu dẫm lên). Khi đang SPLIT chỉ khối vừa lăn
+        # mới dẫm vào ô mới; khối đứng yên không kích hoạt lại switch dưới nó.
+        if s.is_split:
+            landed = (res[1],) if s.active_block == 0 else (res[2],)
+        elif new_orient == Orientation.STANDING:
+            landed = (new_b1,)
+        else:
+            landed = (new_b1, new_b2)
         new_bridges, split_triggered = self._process_switches(
-            new_orient, new_b1, new_b2, s.bridges_state
+            new_orient, landed, s.bridges_state
         )
 
+        # Cầu đóng lại ngay dưới khối (do switch vừa kích hoạt) => rơi
+        if new_bridges != s.bridges_state and not self._is_supported(
+            new_orient, new_b1, new_b2, new_bridges
+        ):
+            return None
+
         # Nếu kích hoạt Split Switch: dịch chuyển và tách thành 2 khối 1x1x1
+        # (cầu được xử lý trước, dịch chuyển sau)
         if split_triggered is not None:
-            p1, p2 = split_triggered
+            (p1, p2), active = split_triggered
+            if not self._is_supported(Orientation.SPLIT, p1, p2, new_bridges):
+                return None
             return State(
                 orientation=Orientation.SPLIT,
                 b1=p1,
                 b2=p2,
-                active_block=0,
+                active_block=active,
                 bridges_state=new_bridges,
             )
 
@@ -234,45 +256,52 @@ class Problem:
     def _process_switches(
         self,
         orient: Orientation,
-        b1: Tuple[int, int],
-        b2: Tuple[int, int],
+        landed: Tuple[Tuple[int, int], ...],
         current_bridges: Tuple[bool, ...],
     ):
-        """Xử lý kích hoạt switch và trả về (trạng thái cầu mới, tọa độ split nếu có)."""
-        bridges = list(current_bridges)
-        cells = [b1] if orient == Orientation.STANDING else [b1, b2]
+        """Xử lý kích hoạt switch tại các ô vừa được dẫm lên.
+
+        Trả về (trạng thái cầu mới, ((p1, p2), khối đang điều khiển) nếu có split).
+
+        Quy tắc khi một nước đi kích hoạt nhiều switch:
+        - Với mỗi cầu, "mở" + "đóng" cùng lúc, hoặc hai lần "toggle" => triệt
+          tiêu nhau (cầu giữ nguyên).
+        - Các trường hợp còn lại: áp dụng tất cả hiệu ứng.
+        - Cầu được xử lý trước, dịch chuyển (split) xử lý sau.
+        """
+        # idx -> [số lệnh mở, số lệnh đóng, số lệnh toggle]
+        effects: Dict[int, List[int]] = {}
         split_triggered = None
 
-        for pos in cells:
+        for pos in landed:
             sw = self.switches.get(pos)
             if sw is None:
                 continue
 
-            # Soft switch: kích hoạt bất kể tư thế hay kích thước khối
-            if sw.switch_type == SwitchType.SOFT:
-                self._apply_switch(sw, bridges)
+            # Soft switch: kích hoạt bất kể tư thế hay kích thước khối.
+            # Heavy / Split switch: chỉ kích hoạt khi khối nguyên vẹn STANDING.
+            if sw.switch_type != SwitchType.SOFT and orient != Orientation.STANDING:
+                continue
 
-            # Heavy switch: chỉ kích hoạt khi khối nguyên vẹn STANDING trên ô đó
-            elif (
-                sw.switch_type == SwitchType.HEAVY
-                and orient == Orientation.STANDING
-            ):
-                self._apply_switch(sw, bridges)
+            for b_pos, mode, target in sw.bridge_effects():
+                counts = effects.setdefault(self.bridge_indices[b_pos], [0, 0, 0])
+                if mode == SwitchMode.TOGGLE:
+                    counts[2] += 1
+                elif target:
+                    counts[0] += 1
+                else:
+                    counts[1] += 1
 
-            # Split switch: chỉ kích hoạt khi khối nguyên vẹn STANDING trên ô đó
-            elif (
-                sw.switch_type == SwitchType.SPLIT
-                and orient == Orientation.STANDING
-            ):
-                split_triggered = sw.split_targets
+            if sw.switch_type == SwitchType.SPLIT:
+                split_triggered = (sw.split_targets, sw.split_active)
+
+        bridges = list(current_bridges)
+        for idx, (opens, closes, toggles) in effects.items():
+            if opens and not closes:
+                bridges[idx] = True
+            elif closes and not opens:
+                bridges[idx] = False
+            if toggles % 2:
+                bridges[idx] = not bridges[idx]
 
         return tuple(bridges), split_triggered
-
-    def _apply_switch(self, sw: Switch, bridges: List[bool]):
-        for b_pos in sw.linked_bridges:
-            idx = self.bridge_indices[b_pos]
-            if sw.mode == SwitchMode.TOGGLE:
-                bridges[idx] = not bridges[idx]
-            elif sw.mode == SwitchMode.PERMANENT:
-                bridges[idx] = sw.target_state
-

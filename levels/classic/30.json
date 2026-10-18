@@ -1,0 +1,102 @@
+{
+  "name": "Classic 30",
+  "group": "classic",
+  "description": "Level 30 of the original game. Features: bridges, fragile tiles.",
+  "reference_moves": 114,
+  "grid": [
+    "...#####FF####.",
+    "...#G##.....F#.",
+    "...###......F#x",
+    ".......F##BB###",
+    "..S....FF.....#",
+    ".x#F...FF.....#",
+    "FFFF...##B..B##",
+    "FFF#F#FF#F..x#B",
+    "#FFFFFFFFFFF#..",
+    ".F#FFF..FFFF#.."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          3,
+          10
+        ],
+        [
+          3,
+          11
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          6,
+          9
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          6,
+          12
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          7,
+          14
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        2,
+        14
+      ],
+      "effects": [
+        {
+          "bridge": 0,
+          "mode": "close"
+        },
+        {
+          "bridge": 1,
+          "mode": "open"
+        },
+        {
+          "bridge": 2,
+          "mode": "open"
+        }
+      ]
+    },
+    {
+      "pos": [
+        5,
+        1
+      ],
+      "mode": "open",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        7,
+        12
+      ],
+      "mode": "toggle",
+      "link": [
+        3
+      ]
+    }
+  ]
+}

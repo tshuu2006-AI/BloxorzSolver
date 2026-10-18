@@ -1,0 +1,78 @@
+{
+  "name": "Classic 19",
+  "group": "classic",
+  "description": "Level 19 of the original game. Features: bridges.",
+  "reference_moves": 67,
+  "grid": [
+    ".S########o####",
+    ".....##......##",
+    ".....##......##",
+    ".............##",
+    ".............##",
+    "###..##BB#o####",
+    "#G#..##........",
+    "###..##........",
+    ".##..##........",
+    ".#BB######o###."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          5,
+          7
+        ],
+        [
+          5,
+          8
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          9,
+          2
+        ],
+        [
+          9,
+          3
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        0,
+        10
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        5,
+        10
+      ],
+      "mode": "close",
+      "link": [
+        1
+      ]
+    },
+    {
+      "pos": [
+        9,
+        10
+      ],
+      "mode": "open",
+      "link": [
+        1
+      ]
+    }
+  ]
+}

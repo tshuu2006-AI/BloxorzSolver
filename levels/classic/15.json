@@ -1,0 +1,133 @@
+{
+  "name": "Classic 15",
+  "group": "classic",
+  "description": "Level 15 of the original game. Features: bridges, teleporters.",
+  "reference_moves": 57,
+  "grid": [
+    ".......###..###",
+    "....#BB###BBx##",
+    "##BB#..###..###",
+    "#####...o......",
+    "##.............",
+    ".#.....p.......",
+    ".#.....#.......",
+    "###...###..o##.",
+    "#S#######BB#G#.",
+    "###...###..o##."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          1,
+          5
+        ],
+        [
+          1,
+          6
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          1,
+          10
+        ],
+        [
+          1,
+          11
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          2,
+          2
+        ],
+        [
+          2,
+          3
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          8,
+          9
+        ],
+        [
+          8,
+          10
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        1,
+        12
+      ],
+      "mode": "toggle",
+      "link": [
+        0,
+        2
+      ]
+    },
+    {
+      "pos": [
+        3,
+        8
+      ],
+      "mode": "toggle",
+      "link": [
+        0,
+        1
+      ]
+    },
+    {
+      "pos": [
+        7,
+        11
+      ],
+      "mode": "close",
+      "link": [
+        3
+      ]
+    },
+    {
+      "pos": [
+        9,
+        11
+      ],
+      "mode": "close",
+      "link": [
+        3
+      ]
+    },
+    {
+      "pos": [
+        5,
+        7
+      ],
+      "targets": [
+        [
+          1,
+          13
+        ],
+        [
+          8,
+          1
+        ]
+      ],
+      "active": 0
+    }
+  ]
+}

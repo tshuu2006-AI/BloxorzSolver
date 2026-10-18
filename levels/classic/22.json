@@ -1,0 +1,91 @@
+{
+  "name": "Classic 22",
+  "group": "classic",
+  "description": "Level 22 of the original game. Features: bridges.",
+  "reference_moves": 65,
+  "grid": [
+    ".....##....###",
+    "...######..#G#",
+    "######o#######",
+    "#S##o..#####B.",
+    "###......###..",
+    ".#........#...",
+    ".#........#...",
+    ".#B......B#...",
+    ".##......##...",
+    "..x......x...."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          3,
+          12
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          7,
+          2
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          7,
+          9
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        2,
+        6
+      ],
+      "mode": "close",
+      "link": [
+        0,
+        1
+      ]
+    },
+    {
+      "pos": [
+        3,
+        4
+      ],
+      "mode": "close",
+      "link": [
+        0,
+        1
+      ]
+    },
+    {
+      "pos": [
+        9,
+        2
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        9,
+        9
+      ],
+      "mode": "toggle",
+      "link": [
+        1
+      ]
+    }
+  ]
+}

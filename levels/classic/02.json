@@ -1,0 +1,64 @@
+{
+  "name": "Classic 02",
+  "group": "classic",
+  "description": "Level 2 of the original game. Features: bridges.",
+  "reference_moves": 17,
+  "grid": [
+    "......####..###",
+    "####..##x#..#G#",
+    "##o#..####..###",
+    "####..####..###",
+    "#S##BB####BB###",
+    "####..####....."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          4,
+          4
+        ],
+        [
+          4,
+          5
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          4,
+          10
+        ],
+        [
+          4,
+          11
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        2,
+        2
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        1,
+        8
+      ],
+      "mode": "toggle",
+      "link": [
+        1
+      ]
+    }
+  ]
+}

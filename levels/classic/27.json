@@ -1,0 +1,71 @@
+{
+  "name": "Classic 27",
+  "group": "classic",
+  "description": "Level 27 of the original game. Features: bridges, fragile tiles.",
+  "reference_moves": 71,
+  "grid": [
+    "###....########",
+    "#S#########..##",
+    "###....##....##",
+    "............#x#",
+    "............##.",
+    "###..FFFF#..oo.",
+    "#G#FFFFFFF..###",
+    "###FFFFFFFFF###",
+    ".....FFFFFFF###",
+    "......B##B....."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          9,
+          6
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          9,
+          9
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        3,
+        13
+      ],
+      "mode": "close",
+      "link": [
+        0,
+        1
+      ]
+    },
+    {
+      "pos": [
+        5,
+        12
+      ],
+      "mode": "close",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        5,
+        13
+      ],
+      "mode": "close",
+      "link": [
+        1
+      ]
+    }
+  ]
+}

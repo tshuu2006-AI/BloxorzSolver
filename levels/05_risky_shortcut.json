@@ -1,0 +1,10 @@
+{
+  "name": "Risky Shortcut",
+  "group": "fragile",
+  "description": "Cross the cracked tiles or take the long way round.",
+  "grid": [
+    "SFFG",
+    "####",
+    "####"
+  ]
+}

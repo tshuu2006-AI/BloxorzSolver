@@ -218,10 +218,13 @@ def build_test_4_split_and_merge() -> Problem:
     3. Giữa (1, 2) và (3, 2) là ô cầu (2, 2) đang ĐÓNG (False), nên b1 bị kẹt tại (1, 2).
     4. Người chơi phải dùng hành động 'SWITCH' để chuyển sang điều khiển b2 tại (3, 2).
     5. Điều khiển b2 đi 'R' sang (3, 3) để dẫm SOFT Switch mở cầu (2, 2),
-       sau đó đi 'L' về (3, 2) rồi đi 'U' lên (2, 2).
-    6. Tại (2, 2), b2 đứng sát b1 ở (1, 2) -> Tự động GHÉP (Merge) thành khối VERTICAL.
-    7. Lăn 'D' một nhịp để khối đứng thẳng (STANDING) vào đúng đích (3, 2).
-    Lời giải kỳ vọng: ['R', 'R', 'SWITCH', 'R', 'L', 'U', 'D'] (7 bước)
+       sau đó đi 'L' quay về (3, 2).
+    6. 'SWITCH' lại sang b1 rồi đi 'D' xuống (2, 2): b1 đứng sát b2 ở (3, 2)
+       -> Tự động GHÉP (Merge) thành khối VERTICAL.
+    7. Lăn 'D' một nhịp để khối đứng thẳng (STANDING) vào đúng đích (4, 2).
+    Lưu ý: ô đích KHÔNG được là chỗ khối đơn dừng/đi vào, vì khối đơn 1x1x1 rơi vào
+    ô đích là thua (xem Problem.result), nên đích đặt ở (4, 2), tách biệt với b2.
+    Lời giải kỳ vọng: ['R', 'R', 'SWITCH', 'R', 'L', 'SWITCH', 'D', 'D'] (8 bước)
     """
     grid = {
         # Khu vực đầu màn chơi
@@ -232,8 +235,9 @@ def build_test_4_split_and_merge() -> Problem:
         # Khu vực sau khi tách khối
         (1, 2): TileType.FLOOR,
         (2, 2): TileType.BRIDGE,  # Cầu nối giữa 2 khối đơn
-        (3, 2): TileType.GOAL,
+        (3, 2): TileType.FLOOR,   # Nơi xuất hiện của b2
         (3, 3): TileType.FLOOR,   # Nơi đặt công tắc mở cầu
+        (4, 2): TileType.GOAL,
     }
     bridge_indices = {(2, 2): 0}
     switches = {
@@ -258,7 +262,7 @@ def build_test_4_split_and_merge() -> Problem:
     )
     return Problem(
         grid=grid,
-        goal_pos=(3, 2),
+        goal_pos=(4, 2),
         initial_state=initial_state,
         bridge_indices=bridge_indices,
         switches=switches,

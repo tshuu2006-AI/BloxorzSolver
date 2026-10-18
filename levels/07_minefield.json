@@ -1,0 +1,10 @@
+{
+  "name": "Minefield",
+  "group": "fragile",
+  "description": "Thin tiles in stripes: only lying blocks get across.",
+  "grid": [
+    "####F###F####",
+    "#S##F###F###G",
+    "####F###F####"
+  ]
+}

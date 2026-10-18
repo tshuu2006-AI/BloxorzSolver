@@ -1,0 +1,42 @@
+{
+  "name": "Obstacle Course",
+  "group": "combined",
+  "description": "Thin ice first, then a bridge you have to open from the side.",
+  "grid": [
+    "#####....#####....o.........",
+    "#S###FFFF#####....#.........",
+    "#####FFFF#############BBB##G",
+    "#####....#####.............."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          22
+        ],
+        [
+          2,
+          23
+        ],
+        [
+          2,
+          24
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        0,
+        18
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    }
+  ]
+}

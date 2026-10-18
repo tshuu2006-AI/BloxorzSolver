@@ -1,0 +1,69 @@
+{
+  "name": "Two Keys",
+  "group": "switch",
+  "description": "Open the first bridge from the side, then stand heavy on the second switch.",
+  "grid": [
+    "......o...............",
+    "......#.....####......",
+    "S######BBB####x##BBB#G",
+    "............####......"
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          7
+        ],
+        [
+          2,
+          8
+        ],
+        [
+          2,
+          9
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          2,
+          17
+        ],
+        [
+          2,
+          18
+        ],
+        [
+          2,
+          19
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        0,
+        6
+      ],
+      "mode": "open",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        2,
+        14
+      ],
+      "mode": "open",
+      "link": [
+        1
+      ]
+    }
+  ]
+}

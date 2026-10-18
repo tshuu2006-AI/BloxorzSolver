@@ -1,0 +1,68 @@
+{
+  "name": "Classic 14",
+  "group": "classic",
+  "description": "Level 14 of the original game. Features: bridges.",
+  "reference_moves": 67,
+  "grid": [
+    "........###...",
+    "...###..###...",
+    "#BB#S#########",
+    "#BB###......x#",
+    "#...........##",
+    "#...........##",
+    "#.......######",
+    "#####...###...",
+    ".##G#...###...",
+    "..###...#####x"
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          1
+        ],
+        [
+          2,
+          2
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          3,
+          1
+        ],
+        [
+          3,
+          2
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        3,
+        12
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        9,
+        13
+      ],
+      "mode": "toggle",
+      "link": [
+        1
+      ]
+    }
+  ]
+}
