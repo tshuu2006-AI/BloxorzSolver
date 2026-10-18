@@ -1,0 +1,170 @@
+{
+  "name": "Classic 31",
+  "group": "classic",
+  "description": "Level 31 of the original game. Features: bridges, fragile tiles.",
+  "reference_moves": 91,
+  "grid": [
+    "...........###B",
+    ".###....x..#G#B",
+    ".###BB###BB###B",
+    ".###..###...#..",
+    ".FFF..o##...F..",
+    "..F...###..FFF.",
+    "..#...###..###.",
+    "B###BB#o#BB#S#.",
+    "B#x#..x....###.",
+    "B###..........."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          0,
+          14
+        ],
+        [
+          1,
+          14
+        ],
+        [
+          2,
+          14
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          2,
+          4
+        ],
+        [
+          2,
+          5
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          2,
+          9
+        ],
+        [
+          2,
+          10
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          7,
+          0
+        ],
+        [
+          8,
+          0
+        ],
+        [
+          9,
+          0
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          7,
+          4
+        ],
+        [
+          7,
+          5
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          7,
+          9
+        ],
+        [
+          7,
+          10
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        1,
+        8
+      ],
+      "mode": "toggle",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        4,
+        6
+      ],
+      "mode": "close",
+      "link": [
+        1,
+        2,
+        4,
+        5
+      ]
+    },
+    {
+      "pos": [
+        7,
+        7
+      ],
+      "mode": "close",
+      "link": [
+        1,
+        2,
+        4,
+        5
+      ]
+    },
+    {
+      "pos": [
+        8,
+        2
+      ],
+      "effects": [
+        {
+          "bridge": 0,
+          "mode": "open"
+        },
+        {
+          "bridge": 1,
+          "mode": "close"
+        }
+      ]
+    },
+    {
+      "pos": [
+        8,
+        6
+      ],
+      "mode": "toggle",
+      "link": [
+        4
+      ]
+    }
+  ]
+}

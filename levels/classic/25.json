@@ -1,0 +1,120 @@
+{
+  "name": "Classic 25",
+  "group": "classic",
+  "description": "Level 25 of the original game. Features: bridges.",
+  "reference_moves": 55,
+  "grid": [
+    "..##..........",
+    "..###.........",
+    "..##o.....###B",
+    "...####B..#G#B",
+    "......##BB###.",
+    ".##...##......",
+    "##x#BB##......",
+    "#SB...##...###",
+    "##B...##o#####",
+    "...........###"
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          13
+        ],
+        [
+          3,
+          13
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          3,
+          7
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          4,
+          8
+        ],
+        [
+          4,
+          9
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          6,
+          4
+        ],
+        [
+          6,
+          5
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          7,
+          2
+        ],
+        [
+          8,
+          2
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        2,
+        4
+      ],
+      "mode": "toggle",
+      "link": [
+        0,
+        2
+      ]
+    },
+    {
+      "pos": [
+        6,
+        2
+      ],
+      "mode": "open",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        8,
+        8
+      ],
+      "effects": [
+        {
+          "bridge": 1,
+          "mode": "open"
+        },
+        {
+          "bridge": 3,
+          "mode": "close"
+        }
+      ]
+    }
+  ]
+}

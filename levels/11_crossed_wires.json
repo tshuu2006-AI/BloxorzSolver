@@ -1,0 +1,51 @@
+{
+  "name": "Crossed Wires",
+  "group": "switch",
+  "description": "Two switches, one bridge. Press both at once and nothing happens.",
+  "grid": [
+    "#######......",
+    "#S##oo#BBB##G",
+    "#######......"
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          1,
+          7
+        ],
+        [
+          1,
+          8
+        ],
+        [
+          1,
+          9
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        1,
+        4
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        1,
+        5
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    }
+  ]
+}

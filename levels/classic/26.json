@@ -1,0 +1,90 @@
+{
+  "name": "Classic 26",
+  "group": "classic",
+  "description": "Level 26 of the original game. Features: bridges, teleporters.",
+  "reference_moves": 104,
+  "grid": [
+    ".....####....p",
+    ".....##o###..#",
+    "....#######..#",
+    "##BB####..####",
+    "###B..#...##..",
+    "###...#...S...",
+    ".#....###.....",
+    ".x....#G#B....",
+    "......###....."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          3,
+          2
+        ],
+        [
+          3,
+          3
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          4,
+          3
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          7,
+          9
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        1,
+        7
+      ],
+      "mode": "close",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        7,
+        1
+      ],
+      "mode": "open",
+      "link": [
+        1,
+        2
+      ]
+    },
+    {
+      "pos": [
+        0,
+        13
+      ],
+      "targets": [
+        [
+          3,
+          12
+        ],
+        [
+          5,
+          10
+        ]
+      ],
+      "active": 0
+    }
+  ]
+}

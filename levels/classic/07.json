@@ -1,0 +1,39 @@
+{
+  "name": "Classic 07",
+  "group": "classic",
+  "description": "Level 7 of the original game. Features: bridges.",
+  "reference_moves": 44,
+  "grid": [
+    "........####...",
+    "........####...",
+    "###.....#..####",
+    "#S#######...#G#",
+    "###....##x..###",
+    "###....###..###",
+    ".##B...#.......",
+    "..######......."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          6,
+          3
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        4,
+        9
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    }
+  ]
+}

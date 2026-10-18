@@ -43,6 +43,15 @@ class ShippedLevels(unittest.TestCase):
     def setUpClass(cls):
         cls.levels = load_levels(LEVELS_DIR) if LEVELS_DIR.exists() else []
 
+    def test_groups_and_names_are_valid_and_unique(self):
+        known = {"simple", "fragile", "switch", "split", "combined"}
+        self.assertTrue(self.levels)
+        names = [lv.name for lv in self.levels]
+        self.assertEqual(len(names), len(set(names)), "tên màn bị trùng")
+        for lv in self.levels:
+            self.assertIn(lv.group, known, lv.name)
+            self.assertTrue(lv.description, f"{lv.name} thiếu mô tả")
+
     def test_every_level_is_solvable_and_replays(self):
         self.assertTrue(self.levels, "chưa có file màn chơi nào trong levels/")
         for level in self.levels:

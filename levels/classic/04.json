@@ -1,0 +1,17 @@
+{
+  "name": "Classic 04",
+  "group": "classic",
+  "description": "Level 4 of the original game. Features: fragile tiles.",
+  "reference_moves": 28,
+  "grid": [
+    "...FFFFFFF....",
+    "...FFFFFFF....",
+    "####.....###..",
+    "###.......##..",
+    "###.......##..",
+    "#S#..####FFFFF",
+    "###..####FFFFF",
+    ".....#G#..FF#F",
+    ".....###..FFFF"
+  ]
+}

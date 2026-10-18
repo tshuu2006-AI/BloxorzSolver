@@ -1,0 +1,14 @@
+{
+  "name": "Classic 03",
+  "group": "classic",
+  "description": "Level 3 of the original game.",
+  "reference_moves": 19,
+  "grid": [
+    "......#######..",
+    "####..###..##..",
+    "#########..####",
+    "#S##.......##G#",
+    "####.......####",
+    "............###"
+  ]
+}

@@ -1,0 +1,187 @@
+{
+  "name": "Classic 33",
+  "group": "classic",
+  "description": "Level 33 of the original game. Features: bridges.",
+  "reference_moves": 65,
+  "grid": [
+    ".....##o###....",
+    ".....######B...",
+    "###..o##o#####.",
+    "#S#BB####oo##o.",
+    ".....##o##o###.",
+    ".....######o##.",
+    "###..######o###",
+    "#G#BB#o#..###ox",
+    "###..###...####",
+    "###.........###"
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          1,
+          11
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          3,
+          3
+        ],
+        [
+          3,
+          4
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          7,
+          3
+        ],
+        [
+          7,
+          4
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        0,
+        7
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        2,
+        5
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        2,
+        8
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        3,
+        9
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        3,
+        10
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        3,
+        13
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        4,
+        7
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        4,
+        10
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        5,
+        11
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        6,
+        11
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        7,
+        6
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        7,
+        13
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        7,
+        14
+      ],
+      "mode": "open",
+      "link": [
+        0
+      ]
+    }
+  ]
+}

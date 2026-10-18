@@ -1,0 +1,51 @@
+{
+  "name": "Toggle Trap",
+  "group": "switch",
+  "description": "The first switch you hit closes the bridge. Find the other one.",
+  "grid": [
+    "......o......",
+    "......#......",
+    "S##o###BBB##G"
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          7
+        ],
+        [
+          2,
+          8
+        ],
+        [
+          2,
+          9
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        0,
+        6
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    },
+    {
+      "pos": [
+        2,
+        3
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    }
+  ]
+}

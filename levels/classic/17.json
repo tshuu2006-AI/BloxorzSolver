@@ -1,0 +1,114 @@
+{
+  "name": "Classic 17",
+  "group": "classic",
+  "description": "Level 17 of the original game. Features: bridges.",
+  "reference_moves": 106,
+  "grid": [
+    "###............",
+    "#S#######B..###",
+    "###....B#####G#",
+    "###.........xx#",
+    "###............",
+    "###............",
+    "###...B#####x..",
+    "########B..##..",
+    "#o#........##..",
+    "###........#x.."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          1,
+          9
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          2,
+          7
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          6,
+          6
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          7,
+          8
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        3,
+        12
+      ],
+      "mode": "close",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        3,
+        13
+      ],
+      "mode": "open",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        6,
+        12
+      ],
+      "mode": "open",
+      "link": [
+        1
+      ]
+    },
+    {
+      "pos": [
+        8,
+        1
+      ],
+      "mode": "toggle",
+      "link": [
+        3
+      ]
+    },
+    {
+      "pos": [
+        9,
+        12
+      ],
+      "effects": [
+        {
+          "bridge": 0,
+          "mode": "open"
+        },
+        {
+          "bridge": 3,
+          "mode": "close"
+        }
+      ]
+    }
+  ]
+}

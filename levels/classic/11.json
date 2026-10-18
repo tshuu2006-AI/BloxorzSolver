@@ -1,0 +1,45 @@
+{
+  "name": "Classic 11",
+  "group": "classic",
+  "description": "Level 11 of the original game. Features: bridges.",
+  "reference_moves": 47,
+  "grid": [
+    ".###B.......",
+    ".#G#B.......",
+    ".###........",
+    ".#...######.",
+    ".#...##..##.",
+    "S######..###",
+    ".....#o....#",
+    ".....####..#",
+    ".....#######",
+    "........###."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          0,
+          4
+        ],
+        [
+          1,
+          4
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        6,
+        6
+      ],
+      "mode": "close",
+      "link": [
+        0
+      ]
+    }
+  ]
+}

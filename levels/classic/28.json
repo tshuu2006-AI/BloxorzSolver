@@ -1,0 +1,76 @@
+{
+  "name": "Classic 28",
+  "group": "classic",
+  "description": "Level 28 of the original game. Features: bridges, teleporters, fragile tiles.",
+  "reference_moves": 100,
+  "grid": [
+    ".##BB##........",
+    ".##..###.......",
+    "FFS..####......",
+    "FF.....###.....",
+    "FF......###....",
+    "F###.....##p...",
+    ".#G#......#####",
+    ".######...#o###",
+    "..#..##...###..",
+    "..#..###BB###.."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          0,
+          3
+        ],
+        [
+          0,
+          4
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          9,
+          8
+        ],
+        [
+          9,
+          9
+        ]
+      ],
+      "open": true
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        7,
+        11
+      ],
+      "mode": "close",
+      "link": [
+        0,
+        1
+      ]
+    },
+    {
+      "pos": [
+        5,
+        11
+      ],
+      "targets": [
+        [
+          6,
+          14
+        ],
+        [
+          9,
+          12
+        ]
+      ],
+      "active": 0
+    }
+  ]
+}

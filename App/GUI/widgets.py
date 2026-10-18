@@ -67,6 +67,8 @@ class Button:
         tooltip: str = "",
         accent=None,
         sublabel: str = "",
+        icon: str = "",
+        font_size: int = 24,
     ):
         self.rect = pygame.Rect(rect)
         self.label = label
@@ -76,6 +78,8 @@ class Button:
         self.enabled = enabled
         self.tooltip = tooltip
         self.accent = accent
+        self.icon = icon
+        self.font_size = font_size
         self.hover = 0.0
         self.pressed = False
 
@@ -122,8 +126,19 @@ class Button:
                 theme.TEXT_DIM if self.enabled else theme.TEXT_FAINT,
                 (r.centerx, r.centery + 17), "center",
             )
+        elif self.icon:
+            cx, cy = r.center
+            s = 11
+            if self.icon == "back":
+                pts = [(cx + s, cy - s), (cx + s, cy + s), (cx - s, cy)]
+                bar = pygame.Rect(cx - s - 5, cy - s, 4, 2 * s)
+            else:
+                pts = [(cx - s, cy - s), (cx - s, cy + s), (cx + s, cy)]
+                bar = pygame.Rect(cx + s + 1, cy - s, 4, 2 * s)
+            pygame.draw.polygon(surf, text, pts)
+            pygame.draw.rect(surf, text, bar, border_radius=1)
         else:
-            draw_text(surf, self.label, theme.font(24, True), text, r.center, "center")
+            draw_text(surf, self.label, theme.font(self.font_size, True), text, r.center, "center")
 
 
 class Slider:

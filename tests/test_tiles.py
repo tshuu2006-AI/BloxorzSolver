@@ -208,5 +208,44 @@ class SplitSwitch(unittest.TestCase):
         self.assertEqual(nxt.bridges_state, (False,))
 
 
+class SwitchExtensions(unittest.TestCase):
+    """Công tắc nhiều hiệu ứng khác loại và khối đơn được chọn sẵn sau khi tách."""
+
+    def test_one_switch_can_open_one_bridge_and_close_another(self):
+        p = build(
+            ["S#oBB#G"],
+            [bridge(0, 3, False), bridge(0, 4, True)],
+            [{"pos": [0, 2], "effects": [{"bridge": 0, "mode": "open"}, {"bridge": 1, "mode": "close"}]}],
+        )
+        self.assertEqual(p.initial.bridges_state, (False, True))
+        self.assertEqual(p.result(at(p, ST, (0, 0)), "R").bridges_state, (True, False))
+
+    def test_effects_can_mix_toggle_with_open(self):
+        p = build(
+            ["S#oBB#G"],
+            [bridge(0, 3, True), bridge(0, 4, True)],
+            [{"pos": [0, 2], "effects": [{"bridge": 0, "mode": "toggle"}, {"bridge": 1, "mode": "open"}]}],
+        )
+        self.assertEqual(p.result(at(p, ST, (0, 0)), "R").bridges_state, (False, True))
+
+    def test_effects_cannot_be_combined_with_link(self):
+        from App.Components.level_loader import LevelError
+
+        with self.assertRaises(LevelError):
+            build(["S#oB#G"], [bridge(0, 3)],
+                  [{"pos": [0, 2], "link": [0], "effects": [{"bridge": 0, "mode": "open"}]}])
+
+    def test_split_switch_can_start_with_the_second_cube_selected(self):
+        for active in (0, 1):
+            p = build(SPLIT_GRID, [], [{"pos": [0, 2], "targets": [[1, 0], [1, 4]], "active": active}])
+            nxt = p.result(at(p, HZ, (0, 0), (0, 1)), "R")
+            self.assertEqual(nxt.active_block, active)
+
+    def test_split_active_must_be_zero_or_one(self):
+        from App.Components.level_loader import LevelError
+
+        with self.assertRaises(LevelError):
+            build(SPLIT_GRID, [], [{"pos": [0, 2], "targets": [[1, 0], [1, 4]], "active": 2}])
+
 if __name__ == "__main__":
     unittest.main()

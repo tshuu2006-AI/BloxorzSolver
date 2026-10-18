@@ -21,6 +21,8 @@ import pygame
 from App.Components.features import SwitchType, TileType
 from App.Components.level_loader import Level, load_levels
 from App.Components.state import Orientation, State
+from App.Game.path import path_steps
+from App.Game.progress import Progress
 from App.Game.session import DELTAS, GameSession, Outcome, Status
 from App.Game.solver_bridge import (
     HEURISTICS,
@@ -42,6 +44,8 @@ from App.GUI.widgets import (
 )
 
 LEVELS_DIR = Path(__file__).resolve().parents[2] / "levels"
+CLASSIC_DIR = LEVELS_DIR / "classic"
+PROGRESS_PATH = Path(__file__).resolve().parents[2] / ".bloxorz_progress.json"
 
 KEY_ACTIONS = {
     pygame.K_UP: "U", pygame.K_w: "U",
@@ -139,16 +143,26 @@ class App:
         self.clock = pygame.time.Clock()
         self.bg = vgradient((theme.WIDTH, theme.HEIGHT), theme.BG_TOP, theme.BG_BOTTOM)
 
-        self.levels: List[Level] = load_levels(LEVELS_DIR)
+        # Classic = 33 màn gốc của game; custom = các màn nhóm tự thiết kế.
+        self.levels: List[Level] = load_levels(CLASSIC_DIR, "classic") if CLASSIC_DIR.exists() else []
+        self.levels += load_levels(LEVELS_DIR, "custom")
         if not self.levels:
             raise SystemExit(f"Không tìm thấy màn chơi trong {LEVELS_DIR}")
-        self.completed: set = set()
+        self.picker_tab = self.levels[0].section
+        self.progress = Progress(PROGRESS_PATH)
+        self.picker_scroll = 0.0
+        self.picker_sel = 0
+        self.used_solver = False
         self.thumbs: Dict[int, pygame.Surface] = {}
         self.picker_open = False
         self.running = True
 
         self.toasts: List[dict] = []
         self.key_flash = {"U": 0.0, "D": 0.0, "L": 0.0, "R": 0.0}
+        self.show_path = True
+        self.path_steps: List[dict] = []
+        self.replay_done: List[str] = []
+        self.step_req = 0
         self.cam = Camera()
         self.cam_dirty = False
         self.cam_drag = None  # "rotate" | "pan" khi đang kéo chuột
@@ -195,8 +209,12 @@ class App:
         self.heur_seg = Segmented(
             (x0, 640, w, 40), HEURISTICS, HEURISTICS.index(self.heuristic), self._set_heuristic
         )
-        self.slider = Slider((x0, 736, 270, 24), 0.5, 4.0, self.speed, "Replay speed")
-        self.btn_pause = Button((x0 + w - 144, 704, 144, 52), "Pause", self.toggle_pause)
+        right = x0 + w
+        self.btn_fwd = Button((right - 60, 704, 60, 52), "", lambda: self._request_step(1), tooltip="Step forward  (.)", icon="fwd")
+        self.btn_pause = Button((right - 60 - 8 - 100, 704, 100, 52), "Pause", self.toggle_pause)
+        self.btn_back = Button((right - 60 - 8 - 100 - 8 - 60, 704, 60, 52), "", lambda: self._request_step(-1), tooltip="Step back  (,)", icon="back")
+        self.slider = Slider((x0, 736, self.btn_back.rect.x - 20 - x0, 24), 0.5, 4.0, self.speed, "Replay speed")
+        self.btn_path = Button((x0 + w - 148, 816, 128, 34), "Path: on", self.toggle_path, font_size=17)
 
         # nút trong banner thắng / thua
         cx = theme.BOARD_AREA.centerx
@@ -212,7 +230,10 @@ class App:
         self.heuristic = name
 
     def _main_buttons(self) -> List[Button]:
-        return [self.btn_new, self.btn_restart, self.btn_undo, *self.solver_buttons.values(), self.btn_pause]
+        return [
+            self.btn_new, self.btn_restart, self.btn_undo, *self.solver_buttons.values(),
+            self.btn_back, self.btn_pause, self.btn_fwd, self.btn_path,
+        ]
 
     def _banner_buttons(self) -> List[Button]:
         if self.anims:
@@ -237,9 +258,12 @@ class App:
         self.replay_total = 0
         self.replay_label = ""
         self.paused = False
+        self.used_solver = False
         self.lost_cells = None
         self.job = None
         self.stats = None
+        self.path_steps = []
+        self.replay_done = []
         self.toasts.clear()
         self.picker_open = False
         self.toast(self.level.name, theme.group_color(self.level.group), 2.0)
@@ -250,6 +274,8 @@ class App:
         self.renderer.set_bridges(self.session.state.bridges_state)
 
     def _reset_play(self):
+        self.used_solver = False
+        self.replay_done = []
         self.anims.clear()
         self.queued = None
         self.replay.clear()
@@ -260,6 +286,7 @@ class App:
         if self.anims:
             self.anims.clear()
         self.replay.clear()
+        self.replay_done = []
         if self.session.undo():
             self.lost_cells = None
             self.renderer.set_bridges(self.session.state.bridges_state)
@@ -268,6 +295,10 @@ class App:
         self.load_level((self.level_idx + 1) % len(self.levels))
 
     def open_picker(self):
+        self.picker_tab = self.level.section
+        self.picker_sel = self.level_idx
+        self.picker_scroll = 0.0
+        self._picker_scroll_to(self.picker_sel)
         self.picker_open = True
 
     def toast(self, text: str, color=None, ttl: float = 2.6):
@@ -284,6 +315,7 @@ class App:
             return None
         if not from_replay:
             self.replay.clear()  # người chơi can thiệp: dừng replay
+            self.replay_done.clear()
         ev = self.session.apply(action)
         self._present(ev)
         return ev
@@ -335,7 +367,8 @@ class App:
             anims.append(FallAnim(piece, statics=statics))
         elif o == Outcome.WON:
             goal = self.level.problem.goal_pos
-            self.completed.add(self.level_idx)
+            if not self.used_solver and self.progress.record_win(self.level.name, self.session.moves):
+                self.toast(f"New best: {self.session.moves} moves", theme.GOOD, 3.0)
             piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True}
             anims.append(SinkAnim(piece, on_start=lambda: self.renderer.burst(goal)))
         elif ev.teleported:
@@ -357,6 +390,12 @@ class App:
     def toggle_pause(self):
         self.paused = not self.paused
 
+    def toggle_path(self):
+        self.show_path = not self.show_path
+
+    def _request_step(self, direction: int):
+        self.step_req = direction
+
     def _poll_solver(self):
         job = self.job
         if job is None or not job.done:
@@ -366,12 +405,15 @@ class App:
             return
         out = job.outcome
         self.stats = out
+        self.path_steps = path_steps(self.level.problem, out.actions) if out.found else []
+        self.replay_done = []
         if out.error:
             self.toast(f"{job.label} failed: {out.error}", theme.BAD, 5.0)
         elif not out.found:
             self.toast(f"{job.label}: no solution found", theme.BAD, 4.0)
         else:
             self.replay = deque(out.actions)
+            self.used_solver = True
             self.replay_total = len(out.actions)
             self.replay_label = job.label
             self.replay_timer = 0.5
@@ -383,10 +425,30 @@ class App:
         self.replay_timer -= dt
         if self.replay_timer > 0:
             return
+        self._run_replay_action()
+
+    def _process_step_request(self):
+        """Nút / phím ``,`` ``.``: đi một hành động tới hoặc lùi trong replay."""
+        direction, self.step_req = self.step_req, 0
+        if not direction or self.anims:
+            return
+        self.paused = True
+        if direction > 0 and self.replay:
+            self._run_replay_action()
+        elif direction < 0 and self.replay_done:
+            action = self.replay_done.pop()
+            if self.session.undo():
+                self.replay.appendleft(action)
+                self.lost_cells = None
+                self.renderer.set_bridges(self.session.state.bridges_state)
+
+    def _run_replay_action(self):
         action = self.replay.popleft()
         step = self.replay_total - len(self.replay)
         ev = self.do_action(action, from_replay=True)
         self.replay_timer = 0.12 / self.speed
+        if ev is not None and ev.outcome in (Outcome.MOVED, Outcome.WON, Outcome.SWITCHED):
+            self.replay_done.append(action)
         if ev is None or ev.outcome in (Outcome.FELL, Outcome.IGNORED, Outcome.BLOCKED):
             self.replay.clear()
             self.toast(
@@ -407,11 +469,20 @@ class App:
         if self._camera_event(event, mouse):
             return
         if self.picker_open:
-            if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                for i, rect in self._picker_cards().items():
+            if event.type == pygame.MOUSEWHEEL:
+                self.picker_scroll = max(
+                    0.0, min(float(self._picker_max_scroll()), self.picker_scroll - event.y * 70)
+                )
+            elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                for key, rect in self._picker_tab_rects().items():
                     if rect.collidepoint(mouse):
-                        self.load_level(i)
+                        self._set_picker_tab(key)
                         return
+                if self._picker_view().collidepoint(mouse):
+                    for i, rect in self._picker_cards().items():
+                        if rect.collidepoint(mouse):
+                            self.load_level(i)
+                            return
                 if not self._picker_panel().collidepoint(mouse):
                     self.picker_open = False
             return
@@ -433,8 +504,7 @@ class App:
         elif k == pygame.K_ESCAPE:
             self.picker_open = False
         elif self.picker_open:
-            if pygame.K_1 <= k <= pygame.K_9 and k - pygame.K_1 < len(self.levels):
-                self.load_level(k - pygame.K_1)
+            self._picker_key(k)
         elif k in KEY_ACTIONS:
             self.do_action(KEY_ACTIONS[k])
         elif k == pygame.K_SPACE:
@@ -449,6 +519,12 @@ class App:
             self.next_level()
         elif k == pygame.K_p:
             self.toggle_pause()
+        elif k == pygame.K_v:
+            self.toggle_path()
+        elif k == pygame.K_PERIOD:
+            self._request_step(1)
+        elif k == pygame.K_COMMA:
+            self._request_step(-1)
         elif k == pygame.K_c:
             self.cam.reset()
             self.cam_dirty = True
@@ -510,7 +586,11 @@ class App:
             btn.sublabel = SOLVER_SUB[name] if ok else "not implemented"
         self.btn_undo.enabled = self.session.can_undo
         self.btn_pause.enabled = bool(self.replay)
-        self.btn_pause.label = "Resume" if self.paused else "Pause"
+        self.btn_pause.label = "Resume" if (self.paused and self.replay) else "Pause"
+        self.btn_fwd.enabled = bool(self.replay)
+        self.btn_back.enabled = bool(self.replay_done)
+        self.btn_path.enabled = bool(self.path_steps)
+        self.btn_path.label = "Path: on" if self.show_path else "Path: off"
 
         self._poll_solver()
         self._update_camera(dt)
@@ -532,6 +612,7 @@ class App:
         elif self.queued:
             action, self.queued = self.queued, None
             self.do_action(action)
+        self._process_step_request()
         self._step_replay(dt)
 
         for k in self.key_flash:
@@ -583,7 +664,7 @@ class App:
 
     def _draw_hud(self, surf):
         lv = self.level
-        name = f"{self.level_idx + 1}.  {lv.name}"
+        name = self._level_title(self.level_idx)
         draw_text(surf, name, theme.font(46, True), theme.TEXT, (56, 40))
         chip_col = theme.group_color(lv.group)
         label = lv.group.upper()
@@ -715,7 +796,9 @@ class App:
         self.heur_seg.draw(surf)
 
         self.slider.draw(surf)
+        self.btn_back.draw(surf)
         self.btn_pause.draw(surf)
+        self.btn_fwd.draw(surf)
         if self.replay:
             done = self.replay_total - len(self.replay)
             draw_text(
@@ -752,6 +835,7 @@ class App:
             draw_text(surf, "No solution found", theme.font(20), theme.BAD, (box.x + 24, box.y + 56))
         else:
             draw_text(surf, self.stats.label, theme.font(22, True), theme.ACCENT, (box.x + 24, box.y + 16))
+            self.btn_path.draw(surf)
             for i, (k, v) in enumerate(self._stat_rows()):
                 y = box.y + 52 + i * 27
                 draw_text(surf, k, theme.font(18), theme.TEXT_DIM, (box.x + 24, y))
@@ -762,22 +846,111 @@ class App:
             draw_text(surf, line, theme.font(15), theme.TEXT_FAINT, (x0 + 2, 1004 + i * 19))
 
     # ------------------------------------------------------------------ chọn màn
-    def _picker_panel(self) -> pygame.Rect:
-        rows = (len(self.levels) + 3) // 4
-        h = min(theme.HEIGHT - 120, 120 + rows * 290 + 40)
-        return pygame.Rect(120, (theme.HEIGHT - h) // 2, theme.WIDTH - 240, h)
+    PICK_COLS, PICK_W, PICK_H, PICK_GAP = 5, 320, 212, 22
+    TABS = (("classic", "CLASSIC"), ("custom", "OUR STAGES"))
 
-    def _picker_cards(self) -> Dict[int, pygame.Rect]:
+    def _tab_ids(self, tab: Optional[str] = None) -> List[int]:
+        tab = tab or self.picker_tab
+        return [i for i, lv in enumerate(self.levels) if lv.section == tab]
+
+    def _section_position(self, idx: int) -> int:
+        """Số thứ tự (từ 1) của màn trong nhóm của nó (Classic hoặc Our stages)."""
+        ids = self._tab_ids(self.levels[idx].section)
+        return ids.index(idx) + 1
+
+    def _level_title(self, idx: int) -> str:
+        lv = self.levels[idx]
+        return lv.name if lv.section == "classic" else f"{self._section_position(idx)}.  {lv.name}"
+
+    @staticmethod
+    def _level_tags(lv: Level) -> str:
+        pb = lv.problem
+        tags = []
+        if any(t == TileType.FRAGILE for t in pb.grid.values()):
+            tags.append("FRAGILE")
+        if pb.bridge_indices:
+            tags.append("BRIDGES")
+        if any(sw.split_targets for sw in pb.switches.values()):
+            tags.append("SPLIT")
+        if any(sw.split_targets is None for sw in pb.switches.values()):
+            tags.append("SWITCHES")
+        return "  \u00b7  ".join(tags) if tags else "PLAIN"
+
+    def _picker_panel(self) -> pygame.Rect:
+        return pygame.Rect(80, 60, theme.WIDTH - 160, theme.HEIGHT - 120)
+
+    def _picker_view(self) -> pygame.Rect:
         panel = self._picker_panel()
-        cols, cw, ch, gap = 4, 392, 262, 28
-        total = cols * cw + (cols - 1) * gap
-        x = panel.centerx - total // 2
-        y = panel.y + 120
+        return pygame.Rect(panel.x + 20, panel.y + 176, panel.w - 40, panel.h - 176 - 24)
+
+    def _picker_tab_rects(self) -> Dict[str, pygame.Rect]:
+        panel = self._picker_panel()
+        w, h, gap = 300, 46, 16
+        x = panel.centerx - (len(self.TABS) * w + (len(self.TABS) - 1) * gap) // 2
         return {
-            i: pygame.Rect(x + (i % cols) * (cw + gap), y + (i // cols) * (ch + gap), cw, ch)
-            for i in range(len(self.levels))
+            key: pygame.Rect(x + i * (w + gap), panel.y + 80, w, h)
+            for i, (key, _) in enumerate(self.TABS)
         }
 
+    def _picker_max_scroll(self) -> int:
+        n = len(self._tab_ids())
+        rows = (n + self.PICK_COLS - 1) // self.PICK_COLS
+        content = rows * (self.PICK_H + self.PICK_GAP) - self.PICK_GAP
+        return max(0, content - self._picker_view().h)
+
+    def _picker_cards(self) -> Dict[int, pygame.Rect]:
+        """Hình chữ nhật (toạ độ màn hình, đã trừ cuộn) của từng thẻ, khoá là chỉ số màn toàn cục."""
+        view = self._picker_view()
+        total = self.PICK_COLS * self.PICK_W + (self.PICK_COLS - 1) * self.PICK_GAP
+        x = view.centerx - total // 2
+        return {
+            gid: pygame.Rect(
+                x + (pos % self.PICK_COLS) * (self.PICK_W + self.PICK_GAP),
+                view.y + (pos // self.PICK_COLS) * (self.PICK_H + self.PICK_GAP) - int(self.picker_scroll),
+                self.PICK_W, self.PICK_H,
+            )
+            for pos, gid in enumerate(self._tab_ids())
+        }
+
+    def _picker_scroll_to(self, gid: int) -> None:
+        view = self._picker_view()
+        ids = self._tab_ids()
+        pos = ids.index(gid) if gid in ids else 0
+        top = (pos // self.PICK_COLS) * (self.PICK_H + self.PICK_GAP)
+        if top < self.picker_scroll:
+            self.picker_scroll = float(top)
+        elif top + self.PICK_H > self.picker_scroll + view.h:
+            self.picker_scroll = float(top + self.PICK_H - view.h)
+        self.picker_scroll = max(0.0, min(float(self._picker_max_scroll()), self.picker_scroll))
+
+    def _set_picker_tab(self, tab: str) -> None:
+        if tab == self.picker_tab:
+            return
+        self.picker_tab = tab
+        self.picker_scroll = 0.0
+        ids = self._tab_ids()
+        if self.picker_sel not in ids and ids:
+            self.picker_sel = ids[0]
+
+    def _picker_key(self, k: int) -> None:
+        ids = self._tab_ids()
+        n = len(ids)
+        if k == pygame.K_TAB:
+            keys = [key for key, _ in self.TABS]
+            self._set_picker_tab(keys[(keys.index(self.picker_tab) + 1) % len(keys)])
+            return
+        pos = ids.index(self.picker_sel) if self.picker_sel in ids else 0
+        step = {
+            pygame.K_LEFT: -1, pygame.K_RIGHT: 1,
+            pygame.K_UP: -self.PICK_COLS, pygame.K_DOWN: self.PICK_COLS,
+        }.get(k)
+        if step is not None:
+            self.picker_sel = ids[max(0, min(n - 1, pos + step))]
+            self._picker_scroll_to(self.picker_sel)
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER):
+            self.load_level(self.picker_sel)
+        elif pygame.K_1 <= k <= pygame.K_9 and k - pygame.K_1 < n:
+            self.load_level(ids[k - pygame.K_1])
     def _thumb(self, i: int, size) -> pygame.Surface:
         if i in self.thumbs:
             return self.thumbs[i]
@@ -820,24 +993,61 @@ class App:
         surf.blit(dim, (0, 0))
         panel = self._picker_panel()
         rrect(surf, panel, theme.PANEL, 28, theme.PANEL_EDGE, 2)
-        draw_text(surf, "Select a stage", theme.font(56, True), theme.TEXT, (panel.centerx, panel.y + 52), "center")
-        draw_text(
-            surf, "Click a card or press 1-9   -   Esc to close", theme.font(20),
-            theme.TEXT_DIM, (panel.centerx, panel.y + 106), "center",
-        )
-        for i, rect in self._picker_cards().items():
-            lv = self.levels[i]
+        draw_text(surf, "Select a stage", theme.font(48, True), theme.TEXT, (panel.centerx, panel.y + 42), "center")
+        for key, label in self.TABS:
+            rect = self._picker_tab_rects()[key]
+            ids = self._tab_ids(key)
+            cleared = sum(1 for i in ids if self.progress.is_cleared(self.levels[i].name))
+            active = key == self.picker_tab
             hot = rect.collidepoint(mouse)
+            rrect(
+                surf, rect, theme.mix(theme.CARD, theme.ACCENT_DARK, 0.9 if active else (0.25 if hot else 0.0)), 14,
+                theme.ACCENT if active else theme.PANEL_EDGE, 2,
+            )
+            draw_text(
+                surf, f"{label}   {cleared}/{len(ids)}", theme.font(21, True),
+                (28, 22, 8) if active else theme.TEXT_DIM, rect.center, "center",
+            )
+        draw_text(
+            surf, "click or arrows + Enter   -   Tab switches section   -   wheel to scroll   -   Esc to close",
+            theme.font(18), theme.TEXT_DIM, (panel.centerx, panel.y + 148), "center",
+        )
+        view = self._picker_view()
+        surf.set_clip(view)
+        view_mouse = view.collidepoint(mouse)
+        for i, rect in self._picker_cards().items():
+            if rect.bottom < view.y or rect.y > view.bottom:
+                continue
+            lv = self.levels[i]
+            hot = view_mouse and rect.collidepoint(mouse)
             col = theme.group_color(lv.group)
-            rrect(surf, rect, theme.CARD_HI if hot else theme.CARD, 20, col if (hot or i == self.level_idx) else theme.PANEL_EDGE, 2)
-            thumb = self._thumb(i, (rect.w - 24, 150))
-            surf.blit(thumb, (rect.x + 12, rect.y + 12))
-            draw_text(surf, f"{i + 1}.  {lv.name}", theme.font(26, True), theme.TEXT, (rect.x + 20, rect.y + 176))
-            draw_text(surf, lv.group.upper(), theme.font(15, True), col, (rect.x + 22, rect.y + 214))
-            if i in self.completed:
-                draw_text(surf, "CLEARED", theme.font(15, True), theme.GOOD, (rect.right - 20, rect.y + 214), "topright")
-
+            selected = i == self.picker_sel or i == self.level_idx
+            rrect(surf, rect, theme.CARD_HI if hot else theme.CARD, 18, col if (hot or selected) else theme.PANEL_EDGE, 2)
+            thumb = self._thumb(i, (rect.w - 24, 118))
+            surf.blit(thumb, (rect.x + 12, rect.y + 10))
+            draw_text(surf, self._level_title(i), theme.font(23, True), theme.TEXT, (rect.x + 18, rect.y + 138))
+            chip = self._level_tags(lv) if lv.section == "classic" else lv.group.upper()
+            draw_text(surf, chip, theme.font(13, True), col, (rect.x + 20, rect.y + 177))
+            best = self.progress.best(lv.name)
+            if best is not None:
+                draw_text(surf, f"CLEARED  -  best {best}", theme.font(13, True), theme.GOOD, (rect.right - 18, rect.y + 192), "topright")
+        surf.set_clip(None)
+        max_scroll = self._picker_max_scroll()
+        if max_scroll:
+            track = pygame.Rect(view.right - 8, view.y, 6, view.h)
+            rrect(surf, track, (40, 48, 70), 3)
+            bar_h = max(40, int(view.h * view.h / (view.h + max_scroll)))
+            bar_y = view.y + int((view.h - bar_h) * self.picker_scroll / max_scroll)
+            rrect(surf, pygame.Rect(track.x, bar_y, 6, bar_h), theme.TEXT_DIM, 3)
     def _draw_tooltip(self, surf, mouse):
+        for btn in (self.btn_back, self.btn_fwd):
+            if btn.enabled and btn.tooltip and btn.rect.collidepoint(mouse):
+                f = theme.font(16)
+                r = pygame.Rect(0, 0, f.size(btn.tooltip)[0] + 24, 34)
+                r.midbottom = (btn.rect.centerx, btn.rect.y - 8)
+                rrect(surf, r, (14, 17, 28, 240), 9, theme.PANEL_EDGE, 2)
+                draw_text(surf, btn.tooltip, f, theme.TEXT, r.center, "center")
+                return
         for name, btn in self.solver_buttons.items():
             if not self.available.get(name) and btn.rect.collidepoint(mouse):
                 module = f"App/Solvers/{name.replace('*', '_star').replace('A_star', 'A_star')}_solver.py"
@@ -857,6 +1067,9 @@ class App:
         surf.blit(self.bg, (0, 0))
         self._draw_hud(surf)
         self.renderer.draw_board(surf)
+        if self.show_path and self.path_steps:
+            done = len(self.replay_done) if (self.replay or self.replay_done) else None
+            self.renderer.draw_path(surf, self.path_steps, done)
         self._draw_pieces(surf)
         self.renderer.draw_particles(surf)
         self._draw_compass(surf)
@@ -883,11 +1096,17 @@ class App:
 
 def main(argv=None) -> None:
     argv = list(sys.argv[1:] if argv is None else argv)
-    start = 0
+    # python play.py [classic|ours] [số màn]: số màn tính trong nhóm đã chọn (mặc định: nhóm Classic)
+    section, number = "classic", 1
     for a in argv:
         if a.isdigit():
-            start = int(a) - 1
-    App(start).run()
+            number = int(a)
+        elif a.lower() in ("classic", "custom", "ours"):
+            section = "custom" if a.lower() in ("custom", "ours") else "classic"
+    app = App(0)
+    ids = [i for i, lv in enumerate(app.levels) if lv.section == section] or [0]
+    app.load_level(ids[max(0, min(number - 1, len(ids) - 1))])
+    app.run()
 
 
 if __name__ == "__main__":

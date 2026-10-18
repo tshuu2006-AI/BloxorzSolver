@@ -70,6 +70,7 @@ GROUP_COLORS = {
     "switch": (92, 190, 236),
     "split": (120, 236, 232),
     "combined": (236, 120, 210),
+    "classic": (255, 196, 64),
 }
 
 

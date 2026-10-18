@@ -1,0 +1,32 @@
+{
+  "name": "Classic 09",
+  "group": "classic",
+  "description": "Level 9 of the original game. Features: teleporters.",
+  "reference_moves": 24,
+  "grid": [
+    "####...#...####",
+    "#S##...#...##p#",
+    "###############",
+    "......#G#......",
+    "......###......"
+  ],
+  "switches": [
+    {
+      "pos": [
+        1,
+        13
+      ],
+      "targets": [
+        [
+          1,
+          2
+        ],
+        [
+          1,
+          12
+        ]
+      ],
+      "active": 1
+    }
+  ]
+}

@@ -195,6 +195,7 @@ class BoardRenderer:
         self.time = 0.0
         self.particles: List[Particle] = []
         self.start_cell = self.problem.initial_state.get_occupied_cells()[0]
+        self._labels = {}
         self.set_camera(cam or Camera())
 
         n_bridges = len(self.problem.bridge_indices)
@@ -458,6 +459,36 @@ class BoardRenderer:
         m = math.hypot(vx, vy) or 1.0
         return vx / m, vy / m
 
+    def _label(self, text: str, size: int, color):
+        key = (text, size, tuple(color))
+        img = self._labels.get(key)
+        if img is None:
+            img = theme.font(size, True).render(text, True, color)
+            self._labels[key] = img
+        return img
+
+    def draw_path(self, surf, steps, done: Optional[int] = None) -> None:
+        """Lớp phủ đường đi của lời giải: ô nào khối đáp xuống, đánh số theo thứ tự.
+
+        ``done`` là số hành động đã chạy trong replay (các bước đã qua sáng hơn);
+        ``None`` nghĩa là không đang replay, vẽ tất cả ở độ sáng vừa.
+        """
+        iso = self.iso
+        last = max((s["step"] for s in steps), default=1)
+        size = max(11, int(iso.L * 0.24))
+        for s in steps:
+            t = (s["step"] - 1) / max(1, last - 1)
+            col = mix(theme.INFO, theme.ACCENT, t)
+            reached = done is None or s["step"] <= done
+            fill, line = (84 if done is None else 120, 200) if reached else (34, 96)
+            for cell in s["cells"]:
+                pts = [(int(x), int(y)) for x, y in self._diamond(cell, 0.41, 0.025)]
+                gfx.filled_polygon(surf, pts, (*col, fill))
+                gfx.aapolygon(surf, pts, (*col, line))
+            r, c = s["cells"][0]
+            x, y = iso.p(r + 0.5, c + 0.5, 0.04)
+            img = self._label(str(s["step"]), size, col if reached else theme.TEXT_DIM)
+            surf.blit(img, img.get_rect(center=(int(x), int(y))))
     # ------------------------------------------------------------------ khối
     def draw_floor_ring(self, surf, cell, color, strength=1.0):
         pulse = 0.5 + 0.5 * math.sin(self.time * 5.0)

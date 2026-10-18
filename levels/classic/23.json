@@ -1,0 +1,154 @@
+{
+  "name": "Classic 23",
+  "group": "classic",
+  "description": "Level 23 of the original game. Features: bridges, teleporters, fragile tiles.",
+  "reference_moves": 75,
+  "grid": [
+    ".###........###",
+    ".#x#........#o#",
+    ".###...###BB###",
+    "B###B..#G#..##o",
+    "#...#..###....#",
+    "o...#..FFF....#",
+    "#BB###FFFFF###B",
+    "...#S#FFFFF#p#.",
+    "...###FFFFF###.",
+    "...#####B......"
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          10
+        ],
+        [
+          2,
+          11
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          3,
+          0
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          3,
+          4
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          6,
+          1
+        ],
+        [
+          6,
+          2
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          6,
+          14
+        ]
+      ],
+      "open": true
+    },
+    {
+      "cells": [
+        [
+          9,
+          8
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        1,
+        2
+      ],
+      "mode": "open",
+      "link": [
+        2
+      ]
+    },
+    {
+      "pos": [
+        1,
+        13
+      ],
+      "effects": [
+        {
+          "bridge": 3,
+          "mode": "open"
+        },
+        {
+          "bridge": 5,
+          "mode": "toggle"
+        }
+      ]
+    },
+    {
+      "pos": [
+        3,
+        14
+      ],
+      "mode": "close",
+      "link": [
+        0,
+        4
+      ]
+    },
+    {
+      "pos": [
+        5,
+        0
+      ],
+      "effects": [
+        {
+          "bridge": 1,
+          "mode": "open"
+        },
+        {
+          "bridge": 3,
+          "mode": "close"
+        }
+      ]
+    },
+    {
+      "pos": [
+        7,
+        12
+      ],
+      "targets": [
+        [
+          2,
+          2
+        ],
+        [
+          7,
+          12
+        ]
+      ],
+      "active": 1
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Detour",
+  "group": "simple",
+  "description": "Plenty of room, but a hole in the middle.",
+  "grid": [
+    "##########",
+    "#S########",
+    "###....###",
+    "###....###",
+    "###....###",
+    "#######G##",
+    "##########"
+  ]
+}

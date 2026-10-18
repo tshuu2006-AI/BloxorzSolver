@@ -131,14 +131,14 @@ class Problem:
         # Nếu kích hoạt Split Switch: dịch chuyển và tách thành 2 khối 1x1x1
         # (cầu được xử lý trước, dịch chuyển sau)
         if split_triggered is not None:
-            p1, p2 = split_triggered
+            (p1, p2), active = split_triggered
             if not self._is_supported(Orientation.SPLIT, p1, p2, new_bridges):
                 return None
             return State(
                 orientation=Orientation.SPLIT,
                 b1=p1,
                 b2=p2,
-                active_block=0,
+                active_block=active,
                 bridges_state=new_bridges,
             )
 
@@ -261,7 +261,7 @@ class Problem:
     ):
         """Xử lý kích hoạt switch tại các ô vừa được dẫm lên.
 
-        Trả về (trạng thái cầu mới, tọa độ split nếu có).
+        Trả về (trạng thái cầu mới, ((p1, p2), khối đang điều khiển) nếu có split).
 
         Quy tắc khi một nước đi kích hoạt nhiều switch:
         - Với mỗi cầu, "mở" + "đóng" cùng lúc, hoặc hai lần "toggle" => triệt
@@ -283,17 +283,17 @@ class Problem:
             if sw.switch_type != SwitchType.SOFT and orient != Orientation.STANDING:
                 continue
 
-            for b_pos in sw.linked_bridges:
+            for b_pos, mode, target in sw.bridge_effects():
                 counts = effects.setdefault(self.bridge_indices[b_pos], [0, 0, 0])
-                if sw.mode == SwitchMode.TOGGLE:
+                if mode == SwitchMode.TOGGLE:
                     counts[2] += 1
-                elif sw.target_state:
+                elif target:
                     counts[0] += 1
                 else:
                     counts[1] += 1
 
             if sw.switch_type == SwitchType.SPLIT:
-                split_triggered = sw.split_targets
+                split_triggered = (sw.split_targets, sw.split_active)
 
         bridges = list(current_bridges)
         for idx, (opens, closes, toggles) in effects.items():

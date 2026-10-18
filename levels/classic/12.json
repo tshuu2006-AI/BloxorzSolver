@@ -1,0 +1,60 @@
+{
+  "name": "Classic 12",
+  "group": "classic",
+  "description": "Level 12 of the original game. Features: bridges.",
+  "reference_moves": 65,
+  "grid": [
+    "............x",
+    ".....###..###",
+    ".....#x#####B",
+    "...#####..##.",
+    "...#G#B...##.",
+    ".#####...####",
+    "##S#.....####",
+    "####..#####..",
+    ".....###.....",
+    ".....###....."
+  ],
+  "bridges": [
+    {
+      "cells": [
+        [
+          2,
+          12
+        ]
+      ],
+      "open": false
+    },
+    {
+      "cells": [
+        [
+          4,
+          6
+        ]
+      ],
+      "open": false
+    }
+  ],
+  "switches": [
+    {
+      "pos": [
+        0,
+        12
+      ],
+      "mode": "toggle",
+      "link": [
+        1
+      ]
+    },
+    {
+      "pos": [
+        2,
+        6
+      ],
+      "mode": "toggle",
+      "link": [
+        0
+      ]
+    }
+  ]
+}

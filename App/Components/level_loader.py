@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 from App.Components.features import (
     Switch,
@@ -77,6 +77,8 @@ class Level:
     problem: Problem
     bridge_groups: List[Tuple[Cell, ...]] = field(default_factory=list)
     path: str = ""
+    section: str = "custom"  # "classic" (màn gốc của game) hoặc "custom" (màn nhóm tự thiết kế)
+    reference_moves: Optional[int] = None  # số nước tối thiểu đã biết (nếu có), dùng để kiểm thử
 
     def bridge_group_of(self, cell: Cell) -> int:
         for i, cells in enumerate(self.bridge_groups):
@@ -154,27 +156,48 @@ def level_from_dict(data: dict, path: str = "") -> Level:
         if pos in switches:
             raise LevelError(f"{where}: hai công tắc trùng ô {pos}")
 
-        linked: List[Cell] = []
-        for g in spec.get("link", []):
-            if not 0 <= g < len(bridge_groups):
-                raise LevelError(f"{where}: switches[{i}] link tới nhóm cầu {g} không tồn tại")
-            linked.extend(bridge_groups[g])
+        def parse_mode(name):
+            if name == "toggle":
+                return SwitchMode.TOGGLE, True
+            if name in ("open", "close"):
+                return SwitchMode.PERMANENT, name == "open"
+            raise LevelError(f"{where}: switches[{i}] mode {name!r} không hợp lệ")
 
-        mode_name = spec.get("mode", "toggle")
-        if mode_name == "toggle":
+        def group_cells(g):
+            if not isinstance(g, int) or not 0 <= g < len(bridge_groups):
+                raise LevelError(f"{where}: switches[{i}] trỏ tới nhóm cầu {g!r} không tồn tại")
+            return bridge_groups[g]
+
+        linked: List[Cell] = []
+        effects = None
+        if "effects" in spec:
+            # Hiệu ứng riêng cho từng nhóm cầu: [{"bridge": g, "mode": "toggle|open|close"}, ...]
+            if "link" in spec or "mode" in spec:
+                raise LevelError(f"{where}: switches[{i}] không dùng 'effects' cùng 'link'/'mode'")
+            effects = []
+            for eff in spec["effects"]:
+                mode, target = parse_mode(eff.get("mode", "toggle"))
+                for cell in group_cells(eff.get("bridge")):
+                    effects.append((cell, mode, target))
+                    if cell not in linked:
+                        linked.append(cell)
             mode, target = SwitchMode.TOGGLE, True
-        elif mode_name in ("open", "close"):
-            mode, target = SwitchMode.PERMANENT, mode_name == "open"
         else:
-            raise LevelError(f"{where}: switches[{i}] mode {mode_name!r} không hợp lệ")
+            for g in spec.get("link", []):
+                linked.extend(group_cells(g))
+            mode, target = parse_mode(spec.get("mode", "toggle"))
 
         split_targets = None
+        split_active = 0
         if _SWITCH_CHARS[ch] == SwitchType.SPLIT:
             raw = spec.get("targets")
             if not raw or len(raw) != 2:
                 raise LevelError(f"{where}: công tắc split tại {pos} cần đúng 2 'targets'")
             a, b = (_cell(t, f"{where}: targets") for t in raw)
             split_targets = (a, b)
+            split_active = spec.get("active", 0)
+            if split_active not in (0, 1):
+                raise LevelError(f"{where}: 'active' của công tắc split tại {pos} phải là 0 hoặc 1")
         elif not linked:
             raise LevelError(f"{where}: công tắc tại {pos} không link tới cầu nào")
         switches[pos] = Switch(
@@ -184,6 +207,8 @@ def level_from_dict(data: dict, path: str = "") -> Level:
             mode=mode,
             target_state=target,
             split_targets=split_targets,
+            effects=effects,
+            split_active=split_active,
         )
     for pos in switch_chars:
         if pos not in switches:
@@ -220,15 +245,18 @@ def level_from_dict(data: dict, path: str = "") -> Level:
         problem=problem,
         bridge_groups=bridge_groups,
         path=path,
+        reference_moves=data.get("reference_moves"),
     )
 
 
-def load_level(path) -> Level:
+def load_level(path, section: str = "custom") -> Level:
     path = Path(path)
     with path.open(encoding="utf-8") as fh:
-        return level_from_dict(json.load(fh), str(path))
+        level = level_from_dict(json.load(fh), str(path))
+    level.section = section
+    return level
 
 
-def load_levels(directory) -> List[Level]:
+def load_levels(directory, section: str = "custom") -> List[Level]:
     """Nạp mọi ``*.json`` trong thư mục, sắp theo tên file."""
-    return [load_level(p) for p in sorted(Path(directory).glob("*.json"))]
+    return [load_level(p, section) for p in sorted(Path(directory).glob("*.json"))]
