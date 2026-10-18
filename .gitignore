@@ -1,12 +1,19 @@
+# Python
 **/__pycache__/
 *.py[cod]
 *$py.class
+.venv/
+venv/
 
-introduction_solve.md
+# Editors / IDEs
 .idea/
 .vscode/
-.bloxorz_progress.json
-results/
 
+# Local data written by the game and tools
+.bloxorz_progress.json
 .bloxorz_settings.json
+results/
 screenshots/
+
+# Notes
+introduction_solve.md

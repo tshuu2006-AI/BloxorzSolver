@@ -28,6 +28,13 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional, Sequence
 
+if hasattr(sys.stdout, "reconfigure"):  # in tiếng Việt đúng trên console Windows
+    sys.stdout.reconfigure(encoding="utf-8")
+
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:  # chạy trực tiếp `python tools/benchmark.py` từ thư mục gốc
+    sys.path.insert(0, str(_ROOT))
+
 from App.Game.experiment import (  # noqa: F401  (một số tên được test và script khác import từ đây)
     FIELDS,
     FRAGILE_PENALTY,
@@ -42,7 +49,7 @@ from App.Game.experiment import (  # noqa: F401  (một số tên được test 
 from App.Components.level_loader import load_level
 from App.Game.solver_bridge import available_solvers
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[1]
 LEVELS_DIR = ROOT / "levels"
 CLASSIC_DIR = LEVELS_DIR / "classic"
 SETS = {"classic": CLASSIC_DIR, "custom": LEVELS_DIR}

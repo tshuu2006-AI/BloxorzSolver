@@ -33,8 +33,11 @@ The window is a 1920x1080 canvas scaled to your screen.
 |---|---|
 | `App/Components/` | Rules engine shared by the game and solvers: `state.py`, `features.py`, `problem.py`, `node.py`, and `level_loader.py` (JSON -> `Problem`) |
 | `App/Solvers/` | Search algorithms (`BaseSolver`, DFS, UCS, A*) |
-| `App/Game/` | `GameSession` (moves, undo, win/fall) and `solver_bridge.py` (runs a solver from the GUI) |
-| `App/GUI/` | pygame app (`app.py`), isometric renderer (`render.py`), widgets, theme |
+| `App/Game/` | GUI-independent game logic: `GameSession` (moves, undo, win/fall), `solver_bridge.py` (runs a solver from the GUI), `experiment.py` / `compare.py` (Compare all), `race_logic.py`, `settings.py`, `progress.py`, `tips.py`, `links.py`, `path.py`, `synth.py` (sound effects) |
+| `App/GUI/` | pygame app (`app.py`), isometric renderer (`render.py`), `race.py`, `compare_view.py`, `audio.py`, widgets, theme |
+| `play.py` | Launches the game (`python play.py [classic\|custom] [n]`) |
+| `main.py`, `App/test.py` | Teammates' command-line runner and hand-built test stages |
+| `tools/benchmark.py` | Benchmark script for the report (see Benchmark below) |
 | `levels/classic/*.json` | The 33 original stages (`NOTICE.md` has the source) |
 | `levels/*.json` | Custom stages (our own), loaded in file-name order |
 | `tests/` | Unit tests (transition table, every tile type, session, all stages solvable) |
@@ -129,12 +132,11 @@ The A* heuristic selector stays on the PLAY tab next to the solver buttons. Choi
 ## Benchmark (for the report's Experiments section)
 
 ```bash
-python benchmark.py                           # every stage (classic + custom) x every available solver
-python benchmark.py --set classic             # only the 33 originals (`--set custom`: only the custom ones)
-python benchmark.py --repeat 5 --timeout 120  # median of 5 runs, kill a run after 120 s
-python benchmark.py --set custom --levels 1-8,20 --solvers "UCS,A*"
-pip install -r requirements-experiments.txt   # once, for the charts
-python benchmark.py --plots                   # also writes results/*.png
+python tools/benchmark.py                           # every stage (classic + custom) x every available solver
+python tools/benchmark.py --set classic             # only the 33 originals (`--set custom`: only the custom ones)
+python tools/benchmark.py --repeat 5 --timeout 120  # median of 5 runs, kill a run after 120 s
+python tools/benchmark.py --set custom --levels 1-8,20 --solvers "UCS,A*"
+python tools/benchmark.py --plots                   # also writes results/*.png
 ```
 
 It runs BFS (once `BFS_solver.py` exists), DFS, UCS, "UCS (risk)" (fragile tiles cost +10, like Test 2B), and A* with each
