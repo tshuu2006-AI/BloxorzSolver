@@ -2,14 +2,15 @@
 
 Phím: mũi tên / WASD lăn khối, Space đổi khối đơn, R chơi lại, Z hoàn tác,
 N chọn màn, Enter sang màn kế khi thắng, F11 toàn màn hình.
-Các phím mũi tên khớp với trục isometric: Up = đi lên-phải, Right = xuống-phải,
-Down = xuống-trái, Left = lên-trái.
+Các phím mũi tên khớp với trục của bàn: Right = sang phải (Tây -> Đông),
+Left = sang trái, Up = lên-trái (về phía trục hàng ``r`` giảm), Down = xuống-phải.
 """
 
 from __future__ import annotations
 
 import ctypes
 import math
+import os
 import sys
 from collections import deque
 from pathlib import Path
@@ -29,7 +30,7 @@ from App.Game.solver_bridge import (
     available_solvers,
 )
 from App.GUI import theme
-from App.GUI.render import BoardRenderer, smoothstep
+from App.GUI.render import BoardRenderer, Camera, smoothstep
 from App.GUI.widgets import (
     Button,
     Segmented,
@@ -127,6 +128,11 @@ class App:
             ctypes.windll.user32.SetProcessDPIAware()
         except Exception:
             pass
+        # Canvas 1920x1080 được GPU phóng ra màn hình thật. Mặc định pygame dùng lọc
+        # "nearest" nên khi tỉ lệ không nguyên (vd 1.5x trên 2880x1800) các nét bị vỡ
+        # răng cưa; lọc tuyến tính cho ảnh mượt.
+        os.environ.setdefault("PYGAME_FORCE_SCALE", "photo")
+        os.environ.setdefault("SDL_RENDER_SCALE_QUALITY", "linear")
         pygame.init()
         pygame.display.set_caption("Bloxorz")
         self._open_window()
@@ -142,6 +148,10 @@ class App:
         self.running = True
 
         self.toasts: List[dict] = []
+        self.key_flash = {"U": 0.0, "D": 0.0, "L": 0.0, "R": 0.0}
+        self.cam = Camera()
+        self.cam_dirty = False
+        self.cam_drag = None  # "rotate" | "pan" khi đang kéo chuột
         self.heuristic = "relaxed"
         self.speed = 1.5
         self.job: Optional[SolverJob] = None
@@ -218,7 +228,7 @@ class App:
         self.level_idx = index
         self.level = self.levels[index]
         self.session = GameSession(self.level)
-        self.renderer = BoardRenderer(self.level)
+        self.renderer = BoardRenderer(self.level, cam=self.cam)
         self.renderer.set_bridges(self.session.state.bridges_state, snap=True)
         self.anims: Deque[Anim] = deque()
         self.queued: Optional[str] = None
@@ -266,6 +276,8 @@ class App:
 
     # ------------------------------------------------------------------ hành động
     def do_action(self, action: str, from_replay: bool = False):
+        if action in self.key_flash:
+            self.key_flash[action] = 1.0  # làm sáng hướng này trên la bàn / mũi tên sàn
         if self.anims:
             if not from_replay:
                 self.queued = action
@@ -392,6 +404,8 @@ class App:
         if event.type == pygame.KEYDOWN:
             self._key(event)
             return
+        if self._camera_event(event, mouse):
+            return
         if self.picker_open:
             if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
                 for i, rect in self._picker_cards().items():
@@ -435,6 +449,51 @@ class App:
             self.next_level()
         elif k == pygame.K_p:
             self.toggle_pause()
+        elif k == pygame.K_c:
+            self.cam.reset()
+            self.cam_dirty = True
+            self.toast("Camera reset", theme.INFO, 1.4)
+
+    # ------------------------------------------------------------------ camera
+    def _in_board(self, mouse) -> bool:
+        return mouse[0] < theme.PANEL_RECT.x - 6 and not self.picker_open
+
+    def _camera_event(self, event, mouse) -> bool:
+        """Zoom bằng cuộn chuột, xoay/nghiêng bằng kéo chuột phải, dịch bằng chuột giữa."""
+        if event.type == pygame.MOUSEWHEEL and self._in_board(mouse):
+            self.cam.zoom_by(1.12 ** event.y)
+            return True
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button in (2, 3) and self._in_board(mouse):
+            self.cam_drag = "rotate" if event.button == 3 else "pan"
+            return True
+        if event.type == pygame.MOUSEBUTTONUP and event.button in (2, 3) and self.cam_drag:
+            self.cam_drag = None
+            return True
+        if event.type == pygame.MOUSEMOTION and self.cam_drag:
+            dx, dy = event.rel
+            if self.cam_drag == "rotate":
+                self.cam.rotate(dx * 0.007, dy * 0.005)
+            else:
+                self.cam.pan[0] += dx
+                self.cam.pan[1] += dy
+            self.cam_dirty = True
+            return True
+        return False
+
+    def _update_camera(self, dt: float) -> None:
+        if not self.picker_open:
+            keys = pygame.key.get_pressed()
+            zoom = (keys[pygame.K_e] - keys[pygame.K_q]) * 1.5 * dt
+            if zoom:
+                self.cam.zoom_by(math.exp(zoom))
+            spin = (keys[pygame.K_RIGHTBRACKET] - keys[pygame.K_LEFTBRACKET]) * 1.3 * dt
+            tilt = (keys[pygame.K_PAGEUP] - keys[pygame.K_PAGEDOWN]) * 0.9 * dt
+            if spin or tilt:
+                self.cam.rotate(spin, tilt)
+                self.cam_dirty = True
+        if self.cam.update(dt) or self.cam_dirty:
+            self.cam_dirty = False
+            self.renderer.set_camera(self.cam)
 
     # ------------------------------------------------------------------ cập nhật
     def update(self, dt: float, mouse):
@@ -454,6 +513,7 @@ class App:
         self.btn_pause.label = "Resume" if self.paused else "Pause"
 
         self._poll_solver()
+        self._update_camera(dt)
         self.renderer.update(dt)
 
         replaying = bool(self.replay)
@@ -474,6 +534,8 @@ class App:
             self.do_action(action)
         self._step_replay(dt)
 
+        for k in self.key_flash:
+            self.key_flash[k] = max(0.0, self.key_flash[k] - dt * 4.0)
         for t in self.toasts:
             t["age"] += dt
         self.toasts = [t for t in self.toasts if t["age"] < t["ttl"]]
@@ -511,7 +573,10 @@ class App:
         pieces = pieces_of(st)
         if self.session.status == Status.LOST and self.lost_cells is not None:
             pieces = [pc for pc in pieces if pc["cells"] != self.lost_cells]
-        for pc in sorted(pieces, key=lambda q: sum(q["cells"][0])):
+        if self.session.status == Status.PLAYING and not self.replay and not self.picker_open:
+            controlled = (st.get_occupied_cells()[st.active_block],) if st.is_split else st.get_occupied_cells()
+            rd.draw_direction_hints(surf, controlled, self.key_flash)
+        for pc in sorted(pieces, key=lambda q: rd.iso.order(*q["cells"][0])):
             if pc["kind"] == "cube" and pc["active"] and len(pieces) == 2:
                 rd.draw_floor_ring(surf, pc["cells"][0], theme.TEXT)
             self.draw_piece(surf, pc)
@@ -529,6 +594,46 @@ class App:
         draw_text(surf, label, f, chip_col, chip.center, "center")
         for i, line in enumerate(wrap_text(lv.description, theme.font(22), 720)[:3]):
             draw_text(surf, line, theme.font(22), theme.TEXT_DIM, (58, 150 + i * 30))
+
+    def _draw_compass(self, surf):
+        """Thẻ chỉ hướng: mỗi phím lăn khối về hướng nào trên màn hình."""
+        card = pygame.Rect(28, 826, 252, 224)
+        rrect(surf, card, (*theme.PANEL, 214), 20, theme.PANEL_EDGE, 2)
+        draw_text(surf, "MOVE KEYS", theme.font(14, True), theme.TEXT_FAINT, (card.x + 18, card.y + 14))
+        cx, cy = card.centerx, card.y + 130
+        pygame.draw.circle(surf, theme.TEXT_FAINT, (cx, cy), 5)
+        labels = {"U": "W  ↑", "D": "S  ↓", "L": "A  ←", "R": "D  →"}
+        for key, label in labels.items():
+            dx, dy = self.renderer.screen_dir(key)
+            hot = self.key_flash[key]
+            col = theme.mix(theme.TEXT_DIM, theme.ACCENT, min(1.0, 0.45 + hot))
+            tip = (cx + dx * 46, cy + dy * 46)
+            pygame.draw.line(surf, col, (cx, cy), tip, 4)
+            px, py = -dy, dx
+            head = [
+                (tip[0] + dx * 12, tip[1] + dy * 12),
+                (tip[0] + px * 8, tip[1] + py * 8),
+                (tip[0] - px * 8, tip[1] - py * 8),
+            ]
+            pygame.draw.polygon(surf, col, head)
+            cap = pygame.Rect(0, 0, 64, 32)
+            cap.center = (cx + dx * 80, cy + dy * 80)
+            fill = theme.mix(theme.CARD, theme.ACCENT_DARK, hot)
+            rrect(surf, cap, fill, 9, col, 2)
+            draw_text(surf, label, theme.font(17, True), theme.TEXT if hot < 0.5 else (28, 22, 8), cap.center, "center")
+
+        cam_card = pygame.Rect(card.right + 14, card.bottom - 98, 372, 98)
+        rrect(surf, cam_card, (*theme.PANEL, 214), 20, theme.PANEL_EDGE, 2)
+        draw_text(surf, "CAMERA", theme.font(14, True), theme.TEXT_FAINT, (cam_card.x + 18, cam_card.y + 12))
+        rows = [
+            ("Zoom", "Q / E  or  mouse wheel"),
+            ("Rotate / tilt", "right-drag   or   [ ]  PgUp PgDn"),
+            ("Pan", "middle-drag        Reset:  C"),
+        ]
+        for i, (k, v) in enumerate(rows):
+            y = cam_card.y + 34 + i * 20
+            draw_text(surf, k, theme.font(15, True), theme.TEXT_DIM, (cam_card.x + 18, y))
+            draw_text(surf, v, theme.font(15), theme.TEXT, (cam_card.x + 122, y))
 
     def _draw_toasts(self, surf):
         y = 40
@@ -754,6 +859,7 @@ class App:
         self.renderer.draw_board(surf)
         self._draw_pieces(surf)
         self.renderer.draw_particles(surf)
+        self._draw_compass(surf)
         self._draw_toasts(surf)
         self._draw_panel(surf, mouse)
         self._draw_banner(surf)

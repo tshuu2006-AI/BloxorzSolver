@@ -1,12 +1,10 @@
 """Vẽ bàn chơi dạng isometric (2.5D): ô sàn có độ dày, cầu, công tắc và khối 3D.
 
-Toạ độ lưới ``(r, c)`` được chiếu như sau (hw, hh là nửa rộng/nửa cao của một ô)::
-
-    x = ox + (c - r) * hw
-    y = oy + (c + r) * hh - z * U
-
-Camera nhìn từ phía r, c lớn và z cao, nên các ô có ``r + c`` lớn hơn nằm gần
-camera hơn và phải được vẽ sau (painter's algorithm).
+Toạ độ lưới ``(r, c, z)`` được chiếu bằng ``Iso.p``: trục cột ``c`` chạy gần như
+Tây -> Đông (nghiêng 15 độ ngược chiều kim đồng hồ), trục hàng ``r`` chạy xuống
+phía người chơi. Camera nhìn từ phía r lớn, c nhỏ và z cao, nên mặt "nam" (r + 1),
+mặt "tây" (c) và mặt trên là các mặt nhìn thấy; ô có ``Iso.order`` lớn hơn nằm
+gần camera hơn và phải được vẽ sau (painter's algorithm).
 """
 
 from __future__ import annotations
@@ -24,8 +22,6 @@ from App.GUI.theme import mix, shade
 
 Cell = Tuple[int, int]
 
-# Hướng tia nhìn (đi về phía camera) khớp với phép chiếu: dz = 2*hh/U * dr.
-_LIGHT = (0.5, 0.25, 0.83)
 _FACES = ((0, 1, 2, 3), (4, 5, 6, 7), (0, 1, 5, 4), (3, 2, 6, 7), (0, 3, 7, 4), (1, 2, 6, 5))
 
 
@@ -48,22 +44,111 @@ def smoothstep(t: float) -> float:
     return t * t * (3 - 2 * t)
 
 
+ELEV_MIN, ELEV_MAX = math.radians(18), math.radians(80)
+ZOOM_MIN, ZOOM_MAX = 0.45, 3.2
+
+
+class Camera:
+    """Góc nhìn do người chơi điều khiển: xoay, độ cao, phóng to, dịch.
+
+    ``alpha`` là góc xoay quanh trục đứng, ``elev`` là góc nâng so với mặt phẳng
+    ngang. Mặc định trục cột ``c`` chạy Tây -> Đông, nghiêng
+    ``theme.AXIS_TILT_DEG`` độ ngược chiều kim đồng hồ.
+    """
+
+    DEFAULT_ELEV = math.asin(0.5)  # 30 độ
+
+    def __init__(self):
+        self.reset()
+
+    @classmethod
+    def default_alpha(cls) -> float:
+        tilt = math.radians(theme.AXIS_TILT_DEG)
+        return -math.atan(math.tan(tilt) / math.sin(cls.DEFAULT_ELEV))
+
+    def reset(self) -> None:
+        self.alpha = self.default_alpha()
+        self.elev = self.DEFAULT_ELEV
+        self.zoom = 1.0
+        self.target_zoom = 1.0
+        self.pan = [0.0, 0.0]
+
+    def rotate(self, d_alpha: float, d_elev: float = 0.0) -> None:
+        self.alpha = (self.alpha + d_alpha + math.pi) % math.tau - math.pi
+        self.elev = max(ELEV_MIN, min(ELEV_MAX, self.elev + d_elev))
+
+    def zoom_by(self, factor: float) -> None:
+        self.target_zoom = max(ZOOM_MIN, min(ZOOM_MAX, self.target_zoom * factor))
+
+    def update(self, dt: float) -> bool:
+        """Làm mượt zoom; trả về True nếu góc nhìn vừa thay đổi."""
+        if abs(self.target_zoom - self.zoom) < 1e-3:
+            changed = self.zoom != self.target_zoom
+            self.zoom = self.target_zoom
+            return changed
+        self.zoom += (self.target_zoom - self.zoom) * min(1.0, dt * 14.0)
+        return True
+
+    def key(self):
+        return (round(self.alpha, 5), round(self.elev, 5), round(self.zoom, 4), *map(round, self.pan))
+
+
+def _axes(alpha: float, elev: float):
+    """Vector màn hình (một đơn vị lưới, chưa nhân tỉ lệ) của +c, +r và +z."""
+    s, uz = math.sin(elev), math.cos(elev)
+    ca, sa = math.cos(alpha), math.sin(alpha)
+    return (ca, s * sa), (-sa, s * ca), uz, (ca, sa, s / uz)
+
+
 class Iso:
-    def __init__(self, rows: int, cols: int, area: pygame.Rect):
-        n = rows + cols
-        by_width = 0.95 * area.w / n
-        by_height = 0.96 * area.h / (n / 2 + 2.3)
-        self.hw = max(26.0, min(80.0, by_width, by_height))
-        self.hh = self.hw / 2
-        self.U = self.hh * 1.9
+    """Phép chiếu từ lưới ``(r, c, z)`` ra màn hình theo ``Camera``.
+
+    Tỉ lệ vừa khít được tính cho góc nhìn mặc định (nên không nhảy khi xoay),
+    tâm bàn cờ luôn ở giữa vùng vẽ (cộng thêm ``cam.pan``).
+    """
+
+    def __init__(self, rows: int, cols: int, area: pygame.Rect, cam: Optional[Camera] = None):
+        cam = cam or Camera()
         self.depth = 0.42  # độ dày ô sàn (đơn vị chiều cao)
-        total_h = n * self.hh + (2 + self.depth) * self.U
-        self.ox = area.centerx - (cols - rows) * self.hw / 2
-        self.oy = area.y + (area.h - total_h) / 2 + 2 * self.U
-        self.view = (1.0, 1.0, 2 * self.hh / self.U)
+
+        # Tỉ lệ vừa khít theo góc nhìn mặc định.
+        (dcx, dcy), (drx, dry), duz, _ = _axes(Camera.default_alpha(), Camera.DEFAULT_ELEV)
+        xs = [c * dcx + r * drx for r in (0, rows) for c in (0, cols)]
+        ys = [c * dcy + r * dry for r in (0, rows) for c in (0, cols)]
+        w1 = max(xs) - min(xs)
+        h1 = (max(ys) - min(ys)) + (2 + self.depth) * duz
+        fit = max(24.0, min(100.0, 0.95 * area.w / w1, 0.96 * area.h / h1))
+
+        (cx, cy), (rx, ry), uz, view = _axes(cam.alpha, cam.elev)
+        self.L = fit * cam.zoom
+        self.hw = self.L * 0.5  # kích thước tham chiếu cho các chi tiết nhỏ
+        self.U = self.L * uz
+        self._cx, self._cy, self._rx, self._ry = cx * self.L, cy * self.L, rx * self.L, ry * self.L
+        mid_r, mid_c = rows / 2, cols / 2
+        self.ox = area.centerx + cam.pan[0] - (mid_c * self._cx + mid_r * self._rx)
+        self.oy = (
+            area.centery + cam.pan[1] - (mid_c * self._cy + mid_r * self._ry)
+            + (2 - self.depth) * self.U / 2  # chừa chỗ cho khối đứng cao phía trên
+        )
+
+        # Tia nhìn về phía camera theo (r, c, z): các điểm trên tia trùng một điểm màn hình.
+        self.ca, self.sa = view[0], view[1]
+        self.view = view
+        # Ánh sáng gắn với camera: từ trước-trái-trên.
+        f, g = (self.ca, self.sa), (-self.sa, self.ca)
+        light = (0.5 * f[0] - 0.25 * g[0], 0.5 * f[1] - 0.25 * g[1], 0.8)
+        m = math.sqrt(light[0] ** 2 + light[1] ** 2 + light[2] ** 2)
+        self.light = (light[0] / m, light[1] / m, light[2] / m)
 
     def p(self, r: float, c: float, z: float = 0.0) -> Tuple[float, float]:
-        return (self.ox + (c - r) * self.hw, self.oy + (c + r) * self.hh - z * self.U)
+        return (
+            self.ox + c * self._cx + r * self._rx,
+            self.oy + c * self._cy + r * self._ry - z * self.U,
+        )
+
+    def order(self, r: float, c: float) -> float:
+        """Khoá vẽ painter: nhỏ hơn = xa camera hơn = vẽ trước."""
+        return r * self.ca + c * self.sa
 
 
 def _sub(a, b):
@@ -103,14 +188,14 @@ class Particle:
 
 
 class BoardRenderer:
-    def __init__(self, level, area: Optional[pygame.Rect] = None):
+    def __init__(self, level, area: Optional[pygame.Rect] = None, cam: Optional[Camera] = None):
         self.level = level
         self.problem = level.problem
-        self.iso = Iso(level.rows, level.cols, area or theme.BOARD_VIEW)
+        self.area = area or theme.BOARD_VIEW
         self.time = 0.0
         self.particles: List[Particle] = []
         self.start_cell = self.problem.initial_state.get_occupied_cells()[0]
-        self.tile_order = sorted(self.problem.grid, key=lambda rc: (rc[0] + rc[1], rc[0]))
+        self.set_camera(cam or Camera())
 
         n_bridges = len(self.problem.bridge_indices)
         self.bridge_color = [theme.TEXT_DIM] * n_bridges
@@ -123,6 +208,13 @@ class BoardRenderer:
         self.bridge_target = list(self.bridge_v)
 
     # ------------------------------------------------------------------ cập nhật
+    def set_camera(self, cam: Camera) -> None:
+        """Dựng lại phép chiếu và thứ tự vẽ khi góc nhìn đổi."""
+        self.iso = Iso(self.level.rows, self.level.cols, self.area, cam)
+        self.tile_order = sorted(
+            self.problem.grid, key=lambda rc: (self.iso.order(*rc), rc[0], rc[1])
+        )
+
     def set_bridges(self, bridges_state: Sequence[bool], snap: bool = False) -> None:
         self.bridge_target = [1.0 if b else 0.0 for b in bridges_state]
         if snap:
@@ -158,15 +250,29 @@ class BoardRenderer:
             gfx.filled_circle(surf, int(pt.x), int(pt.y), pt.size, (*pt.color, a))
 
     # ------------------------------------------------------------------ ô sàn
-    def _prism(self, surf, r, c, top, side_r, side_c, dz=0.0, alpha=255, depth=None):
-        p = self.iso.p
-        d = self.iso.depth if depth is None else depth
+    def _side_color(self, top, normal):
+        lum = 0.50 + 0.66 * max(0.0, _dot(normal, self.iso.light))
+        return shade(top, 0.82 * lum)
+
+    def _prism(self, surf, r, c, top, dz=0.0, alpha=255, depth=None):
+        """Ô sàn dạng lăng trụ: mặt trên + hai mặt bên quay về phía camera."""
+        iso = self.iso
+        p = iso.p
+        d = iso.depth if depth is None else depth
         z0, z1 = dz, dz - d
         top_pts = [p(r, c, z0), p(r, c + 1, z0), p(r + 1, c + 1, z0), p(r + 1, c, z0)]
-        rf = [p(r + 1, c, z0), p(r + 1, c + 1, z0), p(r + 1, c + 1, z1), p(r + 1, c, z1)]
-        cf = [p(r, c + 1, z0), p(r + 1, c + 1, z0), p(r + 1, c + 1, z1), p(r, c + 1, z1)]
-        poly(surf, (*side_r, alpha), rf)
-        poly(surf, (*side_c, alpha), cf)
+        if iso.ca >= 0:  # mặt phía r + 1 quay về camera
+            rr, nr = r + 1, (1.0, 0.0, 0.0)
+        else:
+            rr, nr = r, (-1.0, 0.0, 0.0)
+        if iso.sa >= 0:  # mặt phía c + 1 quay về camera
+            cc, nc = c + 1, (0.0, 1.0, 0.0)
+        else:
+            cc, nc = c, (0.0, -1.0, 0.0)
+        rf = [p(rr, c, z0), p(rr, c + 1, z0), p(rr, c + 1, z1), p(rr, c, z1)]
+        cf = [p(r, cc, z0), p(r + 1, cc, z0), p(r + 1, cc, z1), p(r, cc, z1)]
+        poly(surf, (*self._side_color(top, nr), alpha), rf)
+        poly(surf, (*self._side_color(top, nc), alpha), cf)
         poly(surf, (*top, alpha), top_pts)
         edge = shade(top, 1.22)
         gfx.aapolygon(surf, [(int(x), int(y)) for x, y in top_pts], (*edge, int(alpha * 0.85)))
@@ -191,13 +297,13 @@ class BoardRenderer:
         checker = (r + c) % 2 == 0
         if tile == TileType.FRAGILE:
             top = theme.FRAGILE_TOP if checker else theme.FRAGILE_TOP_ALT
-            self._prism(surf, r, c, top, theme.FRAGILE_SIDE_R, theme.FRAGILE_SIDE_C)
+            self._prism(surf, r, c, top)
             self._draw_cracks(surf, cell)
             return
         top = theme.FLOOR_TOP if checker else theme.FLOOR_TOP_ALT
         if cell == self.start_cell:
             top = theme.START_TOP
-        self._prism(surf, r, c, top, theme.FLOOR_SIDE_R, theme.FLOOR_SIDE_C)
+        self._prism(surf, r, c, top)
         if cell == self.start_cell:
             gfx.aapolygon(
                 surf, [(int(x), int(y)) for x, y in self._diamond(cell, 0.36)],
@@ -241,11 +347,7 @@ class BoardRenderer:
             gfx.aapolygon(surf, inner, (*col, int(90 * (1 - v))))
         if v > 0.03:
             top = mix(theme.FLOOR_TOP, col, 0.62)
-            self._prism(
-                surf, r, c, top, shade(mix(theme.FLOOR_SIDE_R, col, 0.5), 0.9),
-                shade(mix(theme.FLOOR_SIDE_C, col, 0.5), 0.9),
-                dz=-(1 - v) * 0.6, alpha=int(255 * v),
-            )
+            self._prism(surf, r, c, top, dz=-(1 - v) * 0.6, alpha=int(255 * v))
             if v > 0.6:
                 a = int(200 * v)
                 for off in (0.28, 0.5, 0.72):
@@ -319,6 +421,43 @@ class BoardRenderer:
                 if sw.split_targets:
                     self._draw_split_hint(surf, sw.split_targets)
 
+    def draw_direction_hints(self, surf, cells: Sequence[Cell], flash=None) -> None:
+        """Mũi tên dẹt trên sàn quanh khối đang điều khiển: chỉ bốn hướng có thể lăn.
+
+        ``flash`` là dict {"U"/"D"/"L"/"R": 0..1} để làm sáng hướng vừa bấm.
+        """
+        r0, c0, r1, c1 = piece_box(cells)
+        mr, mc = (r0 + r1) / 2, (c0 + c1) / 2
+        half_r, half_c = (r1 - r0) / 2, (c1 - c0) / 2
+        pulse = 0.5 + 0.5 * math.sin(self.time * 4.0)
+        p = self.iso.p
+        for key, (dr, dc) in (("U", (-1, 0)), ("D", (1, 0)), ("L", (0, -1)), ("R", (0, 1))):
+            cr = mr + dr * (half_r + 0.5)
+            cc = mc + dc * (half_c + 0.5)
+            pr, pc = dc, dr  # vuông góc với hướng lăn
+            tip = (cr + dr * 0.34, cc + dc * 0.34)
+            base = (cr - dr * 0.16, cc - dc * 0.16)
+            notch = (cr - dr * 0.02, cc - dc * 0.02)
+            left = (base[0] + pr * 0.26, base[1] + pc * 0.26)
+            right = (base[0] - pr * 0.26, base[1] - pc * 0.26)
+            hot = (flash or {}).get(key, 0.0)
+            a = int(86 + 52 * pulse + 110 * hot)
+            col = theme.mix(theme.ACCENT, (255, 255, 255), hot * 0.6)
+            pts = [p(*tip, 0.03), p(*left, 0.03), p(*notch, 0.03), p(*right, 0.03)]
+            ipts = [(int(x), int(y)) for x, y in pts]
+            gfx.filled_polygon(surf, ipts, (*col, min(255, a)))
+            gfx.aapolygon(surf, ipts, (*col, min(255, a + 60)))
+
+    def screen_dir(self, key: str) -> Tuple[float, float]:
+        """Vector đơn vị trên màn hình của một hướng lăn (U/D/L/R)."""
+        iso = self.iso
+        vx, vy = {
+            "U": (-iso._rx, -iso._ry), "D": (iso._rx, iso._ry),
+            "L": (-iso._cx, -iso._cy), "R": (iso._cx, iso._cy),
+        }[key]
+        m = math.hypot(vx, vy) or 1.0
+        return vx / m, vy / m
+
     # ------------------------------------------------------------------ khối
     def draw_floor_ring(self, surf, cell, color, strength=1.0):
         pulse = 0.5 + 0.5 * math.sin(self.time * 5.0)
@@ -385,12 +524,11 @@ class BoardRenderer:
                 n = (-n[0], -n[1], -n[2])
             if _dot(n, self.iso.view) <= 1e-6:
                 continue
-            depth = fc[0] + fc[1] + fc[2] * self.iso.view[2]
-            faces.append((depth, q, n))
+            faces.append((_dot(fc, self.iso.view), q, n))
         faces.sort(key=lambda item: item[0])
 
         for _, q, n in faces:
-            lum = 0.50 + 0.66 * max(0.0, _dot(n, _LIGHT))
+            lum = 0.50 + 0.66 * max(0.0, _dot(n, self.iso.light))
             col = shade(base, lum)
             pts = [self.iso.p(*v) for v in q]
             poly(surf, (*col, a255), pts, (*shade(col, 0.72), a255))

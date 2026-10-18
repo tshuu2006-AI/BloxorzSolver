@@ -7,6 +7,9 @@ from functools import lru_cache
 import pygame
 
 WIDTH, HEIGHT = 1920, 1080
+
+# Trục cột của bàn chạy Tây -> Đông, nghiêng bấy nhiêu độ ngược chiều kim đồng hồ.
+AXIS_TILT_DEG = 15.0
 PANEL_W = 500
 PANEL_MARGIN = 28
 BOARD_AREA = pygame.Rect(0, 0, WIDTH - PANEL_W - PANEL_MARGIN, HEIGHT)

@@ -11,8 +11,13 @@ python -m App.test --solver ucs   # CLI check of the hand-built test levels
 python -m unittest discover -s tests -t .   # unit tests
 ```
 
-Controls: arrows / WASD roll the block (arrows follow the isometric axes), `Space` swaps the active cube
+Controls: arrows / WASD roll the block (the "Move keys" compass in the corner shows where each key goes on
+screen, and gold arrows on the floor show the same around the piece you control), `Space` swaps the active cube
 when split, `R` restart, `Z` undo, `N` stage select, `Enter` next stage after a win, `F11` fullscreen.
+
+Camera: `Q`/`E` or mouse wheel zoom, right-mouse drag rotates and tilts (or `[` `]` rotate, `PgUp`/`PgDn` tilt),
+middle-mouse drag pans, `C` resets the view. The default view runs the board west-to-east with a 15 degree tilt
+(`AXIS_TILT_DEG` in `App/GUI/theme.py`).
 The window is a 1920x1080 canvas scaled to your screen.
 
 ## Layout
