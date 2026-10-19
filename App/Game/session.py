@@ -44,6 +44,8 @@ class MoveEvent:
     reason: str = ""
     # Với FELL: các ô khối đã lăn tới trước khi rơi (để vẽ hiệu ứng rơi).
     fall_cells: Tuple[Cell, ...] = ()
+    # Với FELL trên ô mỏng: tấm sàn tụt xuống cùng khối.
+    fragile_fall_cells: Tuple[Cell, ...] = ()
     # Cầu đổi trạng thái trong nước đi này: {chỉ số: True nếu vừa mở}.
     bridge_changes: dict = field(default_factory=dict)
     teleported: bool = False
@@ -74,8 +76,19 @@ def explain_fall(problem, s: State, action: str) -> Tuple[str, Tuple[Cell, ...]]
             if idx is None or not s.bridges_state[idx]:
                 return "The bridge is closed - nothing to stand on.", fall_cells
     if orient == Orientation.STANDING and problem.grid.get(b1) == TileType.FRAGILE:
-        return "The fragile tile cracked under the standing block.", fall_cells
+        return "The fragile tile gave way under the standing block.", fall_cells
     return "The floor disappeared under the block.", fall_cells
+
+
+def fragile_fall_cells(problem, s: State, action: str) -> Tuple[Cell, ...]:
+    """Ô fragile tụt xuống trong nước đi này, hoặc ``()`` nếu rơi vì lý do khác."""
+    geom = problem._compute_next_geometry(s, action)
+    if geom is None:
+        return ()
+    orient, b1, _b2 = geom
+    if orient == Orientation.STANDING and problem.grid.get(b1) == TileType.FRAGILE:
+        return (b1,)
+    return ()
 
 
 def fired_switches(problem, ev: "MoveEvent") -> List[Cell]:
@@ -150,6 +163,7 @@ class GameSession:
             self.fail_reason = reason
             return MoveEvent(
                 action, Outcome.FELL, s, reason=reason, fall_cells=fall_cells,
+                fragile_fall_cells=fragile_fall_cells(self.problem, s, action),
                 split_move=s.is_split,
             )
 

@@ -107,9 +107,9 @@ class RollAnim(Anim):
 class FallAnim(Anim):
     kind = "fall"
 
-    def __init__(self, piece, **kw):
+    def __init__(self, piece, fragile_tiles=(), **kw):
         super().__init__(0.55, **kw)
-        self.piece = piece
+        self.piece, self.fragile_tiles = piece, tuple(fragile_tiles)
 
 
 class SinkAnim(Anim):
@@ -426,6 +426,7 @@ class App:
         self.replay.clear()
         self.paused = False
         self.lost_cells = None
+        self.renderer.clear_fragile_falls()
 
     def undo(self):
         if self.anims:
@@ -435,6 +436,7 @@ class App:
         if self.session.undo():
             self.lost_cells = None
             self.renderer.set_bridges(self.session.state.bridges_state)
+            self.renderer.clear_fragile_falls()
 
     def next_level(self):
         self.load_level((self.level_idx + 1) % len(self.levels))
@@ -514,7 +516,14 @@ class App:
                     "height": 2.0 if len(cells) == 1 else 1.0, "active": True,
                 }
             self.lost_cells = moving["cells"]
-            anims.append(FallAnim(piece, statics=statics, on_start=lambda: self.audio.play("fall")))
+            fragile_tiles = ev.fragile_fall_cells
+
+            def start_fall(fragile_tiles=fragile_tiles):
+                for cell in fragile_tiles:
+                    self.renderer.start_fragile_fall(cell)
+                self.audio.play("fall")
+
+            anims.append(FallAnim(piece, fragile_tiles, statics=statics, on_start=start_fall))
         elif o == Outcome.WON:
             goal = self.level.problem.goal_pos
             new_best = not self.used_solver and self.progress.record_win(self.level.name, self.session.moves)
@@ -988,6 +997,8 @@ class App:
             if anim.kind == "roll":
                 self.draw_piece(surf, anim.piece, roll=(anim.direction, smoothstep(p) * math.pi / 2))
             elif anim.kind == "fall":
+                for cell in anim.fragile_tiles:
+                    rd.draw_falling_fragile_tile(surf, cell, p)
                 self.draw_piece(surf, anim.piece, dz=-(p ** 2) * 6.0, alpha=max(0.0, 1.0 - p ** 1.4))
             elif anim.kind == "sink":
                 pc = anim.piece

@@ -15,7 +15,7 @@ TIPS: Dict[str, Tuple[str, str]] = {
     ),
     "fragile": (
         "Fragile tiles",
-        "Orange tiles crack if the whole block stands on them. Lie the block across them instead.",
+        "Orange tiles give way under a standing block and fall with it. Lie the block across them instead.",
     ),
     "switch": (
         "Switches and bridges",

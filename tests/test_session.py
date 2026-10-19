@@ -53,8 +53,10 @@ class Session(unittest.TestCase):
         from App.Components.state import Orientation, State
         s = session(["S#F#G"])
         s.state = State(Orientation.HORIZONTAL, (0, 0), (0, 1), 0, ())
-        self.assertEqual(s.apply("R").outcome, Outcome.FELL)
+        ev = s.apply("R")
+        self.assertEqual(ev.outcome, Outcome.FELL)
         self.assertIn("fragile", s.fail_reason.lower())
+        self.assertEqual(ev.fragile_fall_cells, ((0, 2),))
         s = session(["S#B#G"], [{"cells": [[0, 2]], "open": False}])
         s.apply("R")  # nằm (0,1)-(0,2): (0,2) là cầu đóng
         self.assertEqual(s.status, Status.LOST)

@@ -212,6 +212,8 @@ class BoardRenderer:
         self.swap_pop = 0.0  # >0 ngay sau khi đổi khối điều khiển, làm mũi tên phình to
         self.landing: Optional[dict] = None  # {"cells", "t"}: khối vừa hạ xuống, bị ép dẹt một thoáng
         self.glows: List[dict] = []  # vầng sáng quanh công tắc / cầu vừa đổi trạng thái
+        # Tấm sàn fragile hiện đang rơi cùng block; không vẽ lại ở mặt bàn.
+        self.falling_fragile_cells: set[Cell] = set()
         self._fxbuf: Optional[pygame.Surface] = None
         self.set_camera(cam or Camera())
 
@@ -273,6 +275,14 @@ class BoardRenderer:
     def land_on(self, cells: Sequence[Cell]) -> None:
         """Bắt đầu hiệu ứng ép dẹt cho khối vừa hạ xuống ``cells``."""
         self.landing = {"cells": tuple(cells), "t": 0.0}
+
+    def start_fragile_fall(self, cell: Cell) -> None:
+        """Tấm sàn nguyên khối sẽ được vẽ trong animation rơi, không còn ở mặt bàn."""
+        self.falling_fragile_cells.add(cell)
+
+    def clear_fragile_falls(self) -> None:
+        """Phục hồi mặt bàn khi undo/restart hoặc khi đổi màn."""
+        self.falling_fragile_cells.clear()
 
     def glow(self, cell: Cell, color, strength: float = 1.0, dur: float = 0.9) -> None:
         """Vầng sáng mềm lan ra từ ô ``cell`` (công tắc vừa kích hoạt, cầu vừa đổi, hố đích)."""
@@ -375,7 +385,7 @@ class BoardRenderer:
                 (*theme.shade(theme.START_TOP, 1.5), 170),
             )
 
-    def _draw_cracks(self, surf, cell):
+    def _draw_cracks(self, surf, cell, dz=0.01):
         p = self.iso.p
         r, c = cell
         dark = (112, 56, 20)
@@ -384,7 +394,17 @@ class BoardRenderer:
             [(0.40, 0.46), (0.66, 0.40), (0.84, 0.54)],
             [(0.62, 0.22), (0.58, 0.50)],
         ):
-            polyline(surf, dark, [p(r + a, c + b, 0.01) for a, b in pts], 2)
+            polyline(surf, dark, [p(r + a, c + b, dz) for a, b in pts], 2)
+
+    def draw_falling_fragile_tile(self, surf, cell: Cell, progress: float) -> None:
+        """Vẽ tấm fragile còn nguyên vẹn khi nó tụt xuống bên dưới block."""
+        r, c = cell
+        top = theme.FRAGILE_TOP if (r + c) % 2 == 0 else theme.FRAGILE_TOP_ALT
+        dz = -(progress ** 2) * 6.0
+        alpha = max(0, min(255, int(255 * (1.0 - progress ** 1.4))))
+        self._prism(surf, r, c, top, dz=dz, alpha=alpha)
+        if alpha > 20:
+            self._draw_cracks(surf, cell, dz=dz + 0.01)
 
     def _draw_goal(self, surf, cell):
         self._draw_floor(surf, cell, TileType.FLOOR)
@@ -463,6 +483,8 @@ class BoardRenderer:
         grid = self.problem.grid
         # Bóng đổ nhẹ phía dưới bàn
         for cell in self.tile_order:
+            if cell in self.falling_fragile_cells:
+                continue
             if grid[cell] == TileType.BRIDGE and self.bridge_v[self.problem.bridge_indices[cell]] < 0.5:
                 continue
             gfx.filled_polygon(
@@ -471,6 +493,8 @@ class BoardRenderer:
                 (0, 0, 0, 38),
             )
         for cell in self.tile_order:
+            if cell in self.falling_fragile_cells:
+                continue
             tile = grid[cell]
             if tile == TileType.BRIDGE:
                 self._draw_bridge(surf, cell)

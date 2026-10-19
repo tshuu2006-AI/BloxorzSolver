@@ -43,6 +43,24 @@ class Squash(unittest.TestCase):
         self.assertGreater(LAND_DUR, 0.1)
 
 
+class FragileFall(unittest.TestCase):
+    def test_fragile_tile_can_fall_whole_and_reset(self):
+        import pygame
+        from App.Components.features import TileType
+        from App.GUI.render import BoardRenderer
+
+        level = load_level(LEVELS / "06_thin_ice.json")
+        cell = next(cell for cell, tile in level.problem.grid.items() if tile == TileType.FRAGILE)
+        renderer = BoardRenderer(level)
+        renderer.start_fragile_fall(cell)
+        surf = pygame.Surface((1920, 1080), pygame.SRCALPHA)
+        renderer.draw_board(surf)
+        renderer.draw_falling_fragile_tile(surf, cell, 0.65)
+        self.assertIn(cell, renderer.falling_fragile_cells)
+        renderer.clear_fragile_falls()
+        self.assertNotIn(cell, renderer.falling_fragile_cells)
+
+
 class FiredSwitches(unittest.TestCase):
     def test_soft_switch_reported_only_on_the_move_that_lands_on_it(self):
         level = load_level(LEVELS / "09_soft_touch.json")
