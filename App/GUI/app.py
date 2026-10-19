@@ -107,9 +107,12 @@ class RollAnim(Anim):
 class FallAnim(Anim):
     kind = "fall"
 
-    def __init__(self, piece, fragile_tiles=(), **kw):
-        super().__init__(0.55, **kw)
-        self.piece, self.fragile_tiles = piece, tuple(fragile_tiles)
+    def __init__(self, piece, fragile_tiles=(), tilt_roll=None, dpos=(0.0, 0.0), **kw):
+        super().__init__(0.60, **kw)
+        self.piece = piece
+        self.fragile_tiles = tuple(fragile_tiles)
+        self.tilt_roll = tilt_roll
+        self.dpos = dpos
 
 
 class SinkAnim(Anim):
@@ -539,6 +542,14 @@ class App:
                 self.block_frame = frame_for_orientation(ev.new.orientation)
             elif ev.teleported:
                 self.cube_frames = [INITIAL_FRAME, INITIAL_FRAME]
+            elif prev.is_split and ev.new is not None and ev.new.is_split:
+                unmoved_frame = self.cube_frames[1 - prev.active_block]
+                moved_frame = roll_frame(self.cube_frames[prev.active_block], ev.action)
+                unmoved_pos = prev.get_occupied_cells()[1 - prev.active_block]
+                if ev.new._b1 == unmoved_pos:
+                    self.cube_frames = [unmoved_frame, moved_frame]
+                else:
+                    self.cube_frames = [moved_frame, unmoved_frame]
             elif prev.is_split:
                 self.cube_frames[prev.active_block] = roll_frame(self.cube_frames[prev.active_block], ev.action)
             else:
@@ -563,18 +574,68 @@ class App:
             self.lost_cells = moving["cells"]
             fragile_tiles = ev.fragile_fall_cells
 
+            tilt_roll = None
+            dpos = (0.0, 0.0)
+            if not fragile_tiles:
+                pb = self.level.problem
+                st_prev = prev
+
+                def is_sup(c):
+                    t = pb.grid.get(c, TileType.VOID)
+                    if t == TileType.VOID:
+                        return False
+                    if t == TileType.BRIDGE:
+                        b_idx = pb.bridge_indices.get(c)
+                        if b_idx is not None and not st_prev.bridges_state[b_idx]:
+                            return False
+                    return True
+
+                if len(cells) == 2:
+                    c0, c1 = cells[0], cells[1]
+                    s0, s1 = is_sup(c0), is_sup(c1)
+                    if s0 and not s1:
+                        # c0 trên sàn, c1 rơi ra ngoài -> nghiêng lật về phía c1 quanh mép chung
+                        dr = c1[0] - c0[0]
+                        dc = c1[1] - c0[1]
+                        pivot = c1[0] if dr > 0 else (c0[0] if dr < 0 else (c1[1] if dc > 0 else c0[1]))
+                        tilt_roll = ((dr, dc), 1.25, pivot)
+                        dpos = (dr * 0.75, dc * 0.75)
+                    elif s1 and not s0:
+                        # c1 trên sàn, c0 rơi ra ngoài -> nghiêng lật về phía c0 quanh mép chung
+                        dr = c0[0] - c1[0]
+                        dc = c0[1] - c1[1]
+                        pivot = c0[0] if dr > 0 else (c1[0] if dr < 0 else (c0[1] if dc > 0 else c1[1]))
+                        tilt_roll = ((dr, dc), 1.25, pivot)
+                        dpos = (dr * 0.75, dc * 0.75)
+                    else:
+                        # Cả 2 ô đều lăn ra ngoài sàn: trôi chéo theo quán tính hướng lăn
+                        dr, dc = DELTAS.get(ev.action, (0, 0))
+                        tilt_roll = ((dr, dc), 0.55, None)
+                        dpos = (dr * 0.65, dc * 0.65)
+                else:
+                    # Khối đứng hoặc khối 1x1 bước ra khoảng không: rơi chéo theo quán tính
+                    dr, dc = DELTAS.get(ev.action, (0, 0))
+                    tilt_roll = ((dr, dc), 0.45, None)
+                    dpos = (dr * 0.5, dc * 0.5)
+
             def start_fall(fragile_tiles=fragile_tiles):
                 for cell in fragile_tiles:
                     self.renderer.start_fragile_fall(cell)
+                    if self.renderer.arctic_theme:
+                        fragile_colors = [(180, 235, 255), (140, 210, 240), (240, 250, 255), (100, 180, 220)]
+                    else:
+                        fragile_colors = [theme.FRAGILE_TOP, theme.FRAGILE_SIDE_R, (180, 90, 40), (240, 160, 90)]
+                    self.renderer.burst(cell, n=28, colors=fragile_colors, z=0.05)
                 self.audio.play("fall")
 
-            anims.append(FallAnim(piece, fragile_tiles, statics=statics, on_start=start_fall))
+            anims.append(FallAnim(piece, fragile_tiles, tilt_roll=tilt_roll, dpos=dpos, statics=statics, on_start=start_fall))
         elif o == Outcome.WON:
             goal = self.level.problem.goal_pos
             new_best = not self.used_solver and self.progress.record_win(self.level.name, self.session.moves)
             if new_best:
                 self.toast(f"New best: {self.session.moves} moves", theme.GOOD, 3.0)
-            piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True, "frame": INITIAL_FRAME}
+            won_frame = roll_frame(self.block_frame, ev.action)
+            piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True, "frame": won_frame}
 
             def swallowed():
                 self.renderer.burst(goal)
@@ -778,6 +839,7 @@ class App:
                 if self.frame_history:
                     self.block_frame, self.cube_frames = self.frame_history.pop()
                 self.renderer.set_bridges(self.session.state.bridges_state)
+                self.renderer.clear_fragile_falls()
 
     def _run_replay_action(self):
         action = self.replay.popleft()
@@ -1037,23 +1099,35 @@ class App:
             active=piece["active"], frame=frame, **kw,
         )
 
-    def _draw_pieces(self, surf):
+    def _draw_pieces(self, surf, static_filter=None):
         rd = self.renderer
         st = self.session.state
         if self.anims:
             anim = self.anims[0]
             p = min(1.0, anim.t / anim.dur)
             for s in anim.statics:
-                self.draw_piece(surf, s)
+                if static_filter is None or static_filter(s):
+                    self.draw_piece(surf, s)
             if anim.kind == "roll":
                 self.draw_piece(surf, anim.piece, roll=(anim.direction, smoothstep(p) * math.pi / 2))
             elif anim.kind == "fall":
                 for cell in anim.fragile_tiles:
                     rd.draw_falling_fragile_tile(surf, cell, p)
-                self.draw_piece(surf, anim.piece, dz=-(p ** 2) * 6.0, alpha=max(0.0, 1.0 - p ** 1.4))
+                dz = -(p ** 2) * 6.0
+                alpha = max(0.0, 1.0 - p ** 1.4)
+                roll_arg = None
+                if anim.tilt_roll is not None:
+                    tdir, max_theta, piv = anim.tilt_roll
+                    roll_arg = (tdir, smoothstep(p) * max_theta, piv)
+                dr_off = (p ** 1.5) * anim.dpos[0]
+                dc_off = (p ** 1.5) * anim.dpos[1]
+                self.draw_piece(
+                    surf, anim.piece, roll=roll_arg, dz=dz, alpha=alpha,
+                    dr_offset=dr_off, dc_offset=dc_off,
+                )
             elif anim.kind == "sink":
                 pc = anim.piece
-                rd.draw_swallow(surf, pc["cells"], pc["kind"], pc["height"], p)
+                rd.draw_swallow(surf, pc["cells"], pc["kind"], pc["height"], p, frame=pc.get("frame"))
             elif anim.kind == "spawn":
                 e = smoothstep(p)
                 for piece in anim.pieces:
@@ -1606,14 +1680,38 @@ class App:
         surf = self.screen
         surf.blit(self.bg, (0, 0))
         self._draw_hud(surf)
-        self.renderer.draw_board(surf)
-        self.renderer.draw_glows(surf)
-        if self.settings.show_link_lines and self.link_segs:
-            self.renderer.draw_link_lines(surf, self.link_segs)
-        if self.show_path and self.path_steps:
-            done = len(self.replay_done) if (self.replay or self.replay_done) else None
-            self.renderer.draw_path(surf, self.path_steps, done)
-        self._draw_pieces(surf)
+
+        falling_anim = self.anims[0] if (self.anims and self.anims[0].kind == "fall") else None
+        if falling_anim:
+            p = min(1.0, falling_anim.t / falling_anim.dur)
+            dr_off = (p ** 1.5) * falling_anim.dpos[0]
+            dc_off = (p ** 1.5) * falling_anim.dpos[1]
+            fall_cells = falling_anim.piece["cells"]
+            mid_r = sum(c[0] for c in fall_cells) / len(fall_cells) + dr_off
+            mid_c = sum(c[1] for c in fall_cells) / len(fall_cells) + dc_off
+            cut_order = self.renderer.iso.order(mid_r, mid_c)
+
+            self.renderer.draw_board(surf, max_order=cut_order)
+            self._draw_pieces(surf, static_filter=lambda s: self.renderer.iso.order(*s["cells"][0]) <= cut_order)
+            self.renderer.draw_board(surf, min_order=cut_order, show_hints=False)
+            for s in falling_anim.statics:
+                if self.renderer.iso.order(*s["cells"][0]) > cut_order:
+                    self.draw_piece(surf, s)
+            self.renderer.draw_glows(surf)
+            if self.settings.show_link_lines and self.link_segs:
+                self.renderer.draw_link_lines(surf, self.link_segs)
+            if self.show_path and self.path_steps:
+                done = len(self.replay_done) if (self.replay or self.replay_done) else None
+                self.renderer.draw_path(surf, self.path_steps, done)
+        else:
+            self.renderer.draw_board(surf)
+            self.renderer.draw_glows(surf)
+            if self.settings.show_link_lines and self.link_segs:
+                self.renderer.draw_link_lines(surf, self.link_segs)
+            if self.show_path and self.path_steps:
+                done = len(self.replay_done) if (self.replay or self.replay_done) else None
+                self.renderer.draw_path(surf, self.path_steps, done)
+            self._draw_pieces(surf)
         self.renderer.draw_particles(surf)
         self._draw_compass(surf)
         self._draw_toasts(surf)

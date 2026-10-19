@@ -427,21 +427,22 @@ class BoardRenderer:
             [(0.62, 0.22), (0.58, 0.50)],
         ):
             polyline(surf, dark, [p(r + a, c + b, dz) for a, b in pts], 2)
+            if self.arctic_theme:
+                # Đường viền nứt trắng sáng giả lập bề mặt tảng băng rạn nứt
+                polyline(surf, (255, 255, 255), [p(r + a + 0.01, c + b + 0.01, dz + 0.004) for a, b in pts], 1)
 
     def draw_falling_fragile_tile(self, surf, cell: Cell, progress: float) -> None:
         """Vẽ tấm fragile còn nguyên vẹn khi nó tụt xuống bên dưới block."""
         r, c = cell
-        top = theme.FRAGILE_TOP if (r + c) % 2 == 0 else theme.FRAGILE_TOP_ALT
+        if self.arctic_theme:
+            top = theme.ARCTIC_FRAGILE_TOP if (r + c) % 2 == 0 else theme.ARCTIC_FRAGILE_TOP_ALT
+        else:
+            top = theme.FRAGILE_TOP if (r + c) % 2 == 0 else theme.FRAGILE_TOP_ALT
         dz = -(progress ** 2) * 6.0
         alpha = max(0, min(255, int(255 * (1.0 - progress ** 1.4))))
         self._prism(surf, r, c, top, dz=dz, alpha=alpha)
-        dark = (42, 105, 148) if self.arctic_theme else (112, 56, 20)
         if alpha > 20:
             self._draw_cracks(surf, cell, dz=dz + 0.01)
-            polyline(surf, dark, [p(r + a, c + b, 0.01) for a, b in pts], 2)
-            if self.arctic_theme:
-                # Đường viền nứt trắng sáng giả lập bề mặt tảng băng rạn nứt
-                polyline(surf, (255, 255, 255), [p(r + a + 0.01, c + b + 0.01, 0.014) for a, b in pts], 1)
 
     def _draw_goal(self, surf, cell):
         self._draw_floor(surf, cell, TileType.FLOOR)
@@ -558,21 +559,33 @@ class BoardRenderer:
             gfx.filled_polygon(surf, pts, (*theme.SPLIT_COLOR, 26))
 
     # ------------------------------------------------------------------ vẽ bàn
-    def draw_board(self, surf, show_hints: bool = True) -> None:
+    def draw_board(
+        self,
+        surf,
+        show_hints: bool = True,
+        min_order: Optional[float] = None,
+        max_order: Optional[float] = None,
+    ) -> None:
         grid = self.problem.grid
-        # Bóng đổ nhẹ phía dưới bàn
+        # Bóng đổ nhẹ phía dưới bàn: chỉ vẽ ở pass đầu (khi min_order is None)
+        if min_order is None:
+            for cell in self.tile_order:
+                if cell in self.falling_fragile_cells:
+                    continue
+                if grid[cell] == TileType.BRIDGE and self.bridge_v[self.problem.bridge_indices[cell]] < 0.5:
+                    continue
+                gfx.filled_polygon(
+                    surf,
+                    [(int(x), int(y)) for x, y in self._diamond(cell, 0.62, -self.iso.depth - 0.55, 0.08, 0.08)],
+                    (0, 0, 0, 38),
+                )
         for cell in self.tile_order:
             if cell in self.falling_fragile_cells:
                 continue
-            if grid[cell] == TileType.BRIDGE and self.bridge_v[self.problem.bridge_indices[cell]] < 0.5:
+            ord_val = self.iso.order(*cell)
+            if max_order is not None and ord_val > max_order:
                 continue
-            gfx.filled_polygon(
-                surf,
-                [(int(x), int(y)) for x, y in self._diamond(cell, 0.62, -self.iso.depth - 0.55, 0.08, 0.08)],
-                (0, 0, 0, 38),
-            )
-        for cell in self.tile_order:
-            if cell in self.falling_fragile_cells:
+            if min_order is not None and ord_val <= min_order:
                 continue
             tile = grid[cell]
             if tile == TileType.BRIDGE:
@@ -584,7 +597,7 @@ class BoardRenderer:
             sw = self.problem.switches.get(cell)
             if sw is not None:
                 self._draw_switch(surf, cell, sw)
-        if show_hints:
+        if show_hints and min_order is None:
             for sw in self.problem.switches.values():
                 if sw.split_targets:
                     self._draw_split_hint(surf, sw.split_targets)
@@ -708,22 +721,25 @@ class BoardRenderer:
         kind: str,
         height: float,
         *,
-        roll: Optional[Tuple[Tuple[int, int], float]] = None,
+        roll: Optional[Tuple] = None,
         frame: Optional[Frame3D] = None,
         dz: float = 0.0,
+        dr_offset: float = 0.0,
+        dc_offset: float = 0.0,
         alpha: float = 1.0,
         active: bool = True,
         color=None,
         scale: float = 1.0,
         shadow: bool = True,
+        draw_penguin: bool = True,
     ) -> None:
         """Vẽ một khối 3D phủ ``cells`` cao ``height`` (đơn vị ô).
 
-        ``roll = (hướng, theta)`` xoay khối quanh cạnh đáy phía hướng lăn.
+        ``roll = (hướng, theta)`` hoặc ``(hướng, theta, pivot)`` xoay khối quanh cạnh trục quay.
         ``frame = (head, front, right)`` xác định hướng 3D của chim cánh cụt bên trong.
         """
         r0, c0, r1, c1 = box = piece_box(cells)
-        if roll is None and dz == 0.0:
+        if roll is None and dz == 0.0 and dr_offset == 0.0 and dc_offset == 0.0:
             sq = self.squash_at(cells)  # vừa hạ xuống: ép dẹt rồi nảy lại
             if sq:
                 height *= 1.0 - sq
@@ -740,7 +756,7 @@ class BoardRenderer:
         ]
         if roll is not None:
             verts = self._rotate(verts, box, *roll)
-        verts = [(r, c, z + dz) for r, c, z in verts]
+        verts = [(r + dr_offset, c + dc_offset, z + dz) for r, c, z in verts]
 
         cube = kind != "block"
         if color is not None:
@@ -782,65 +798,69 @@ class BoardRenderer:
         faces.sort(key=lambda item: item[0])
 
         # ----------------- VẼ CHIM CÁNH CỤT BÊN TRONG (ARCTIC THEME) -----------------
-        if self.arctic_theme:
+        if self.arctic_theme and draw_penguin:
             is_cube = kind != "block"
-            p_verts, p_faces, p_colors = get_penguin_mesh(is_cube=is_cube)
-            if frame is None:
-                if is_cube or len(cells) == 1:
-                    actual_frame = INITIAL_FRAME
-                else:
-                    c_list = list(cells)
-                    if c_list[0][0] != c_list[1][0]:
-                        actual_frame = ((1, 0, 0), (0, 0, -1), (0, 1, 0))  # Vertical dọc theo R
+            orig_h = 1.0 if is_cube or len(cells) > 1 or kind != "block" else 2.0
+            h_ratio = max(0.0, height / orig_h)
+            p_scale = scale * min(1.0, h_ratio)
+            if p_scale > 0.01:
+                p_verts, p_faces, p_colors = get_penguin_mesh(is_cube=is_cube)
+                if frame is None:
+                    if is_cube or len(cells) == 1:
+                        actual_frame = INITIAL_FRAME
                     else:
-                        actual_frame = ((0, 1, 0), (1, 0, 0), (0, 0, -1))  # Horizontal dọc theo C
-            else:
-                actual_frame = frame
+                        c_list = list(cells)
+                        if c_list[0][0] != c_list[1][0]:
+                            actual_frame = ((1, 0, 0), (0, 0, -1), (0, 1, 0))  # Vertical dọc theo R
+                        else:
+                            actual_frame = ((0, 1, 0), (1, 0, 0), (0, 0, -1))  # Horizontal dọc theo C
+                else:
+                    actual_frame = frame
 
-            head_vec, front_vec, right_vec = actual_frame
+                head_vec, front_vec, right_vec = actual_frame
 
-            # Tâm của khối trong không gian thế giới (r, c, z)
-            box_cx = (r0 + r1) / 2.0
-            box_cy = (c0 + c1) / 2.0
-            box_cz = height / 2.0
+                # Tâm của khối trong không gian thế giới (r, c, z)
+                box_cx = (r0 + r1) / 2.0
+                box_cy = (c0 + c1) / 2.0
+                box_cz = height / 2.0
 
-            # Biến đổi từng đỉnh của chim theo hệ trục 3D của khối:
-            abs_pverts = []
-            for vr, vc, vz in p_verts:
-                pr = box_cx + (vr * front_vec[0] + vc * right_vec[0] + vz * head_vec[0]) * scale
-                pc = box_cy + (vr * front_vec[1] + vc * right_vec[1] + vz * head_vec[1]) * scale
-                pz = box_cz + (vr * front_vec[2] + vc * right_vec[2] + vz * head_vec[2]) * scale
-                abs_pverts.append((pr, pc, pz))
+                # Biến đổi từng đỉnh của chim theo hệ trục 3D của khối:
+                abs_pverts = []
+                for vr, vc, vz in p_verts:
+                    pr = box_cx + (vr * front_vec[0] + vc * right_vec[0] + vz * head_vec[0]) * p_scale
+                    pc = box_cy + (vr * front_vec[1] + vc * right_vec[1] + vz * head_vec[1]) * p_scale
+                    pz = box_cz + (vr * front_vec[2] + vc * right_vec[2] + vz * head_vec[2]) * p_scale
+                    abs_pverts.append((pr, pc, pz))
 
-            if roll is not None:
-                abs_pverts = self._rotate(abs_pverts, box, *roll)
-            abs_pverts = [(r, c, z + dz) for r, c, z in abs_pverts]
+                if roll is not None:
+                    abs_pverts = self._rotate(abs_pverts, box, *roll)
+                abs_pverts = [(r + dr_offset, c + dc_offset, z + dz) for r, c, z in abs_pverts]
 
-            p_centroid = (
-                sum(v[0] for v in abs_pverts) / max(1, len(abs_pverts)),
-                sum(v[1] for v in abs_pverts) / max(1, len(abs_pverts)),
-                sum(v[2] for v in abs_pverts) / max(1, len(abs_pverts)),
-            )
-            p_faces_to_draw = []
-            for f_idx, f in enumerate(p_faces):
-                q = [abs_pverts[i] for i in f]
-                if len(q) < 3:
-                    continue
-                n = _norm(_cross(_sub(q[1], q[0]), _sub(q[2], q[0])))
-                fc = (sum(v[0] for v in q) / len(q), sum(v[1] for v in q) / len(q), sum(v[2] for v in q) / len(q))
-                if _dot(n, _sub(fc, p_centroid)) < 0:
-                    n = (-n[0], -n[1], -n[2])
-                if _dot(n, self.iso.view) <= 1e-6:
-                    continue
-                p_faces_to_draw.append((_dot(fc, self.iso.view), q, n, p_colors[f_idx]))
+                p_centroid = (
+                    sum(v[0] for v in abs_pverts) / max(1, len(abs_pverts)),
+                    sum(v[1] for v in abs_pverts) / max(1, len(abs_pverts)),
+                    sum(v[2] for v in abs_pverts) / max(1, len(abs_pverts)),
+                )
+                p_faces_to_draw = []
+                for f_idx, f in enumerate(p_faces):
+                    q = [abs_pverts[i] for i in f]
+                    if len(q) < 3:
+                        continue
+                    n = _norm(_cross(_sub(q[1], q[0]), _sub(q[2], q[0])))
+                    fc = (sum(v[0] for v in q) / len(q), sum(v[1] for v in q) / len(q), sum(v[2] for v in q) / len(q))
+                    if _dot(n, _sub(fc, p_centroid)) < 0:
+                        n = (-n[0], -n[1], -n[2])
+                    if _dot(n, self.iso.view) <= 1e-6:
+                        continue
+                    p_faces_to_draw.append((_dot(fc, self.iso.view), q, n, p_colors[f_idx]))
 
-            p_faces_to_draw.sort(key=lambda item: item[0])
-            for _, q, n, fcol in p_faces_to_draw:
-                lum = 0.52 + 0.62 * max(0.0, _dot(n, self.iso.light))
-                col = shade(fcol, lum)
-                pts = [self.iso.p(*v) for v in q]
-                poly(surf, (*col, a255), pts)
-                gfx.aapolygon(surf, [(int(x), int(y)) for x, y in pts], (*shade(col, 0.78), a255))
+                p_faces_to_draw.sort(key=lambda item: item[0])
+                for _, q, n, fcol in p_faces_to_draw:
+                    lum = 0.52 + 0.62 * max(0.0, _dot(n, self.iso.light))
+                    col = shade(fcol, lum)
+                    pts = [self.iso.p(*v) for v in q]
+                    poly(surf, (*col, a255), pts)
+                    gfx.aapolygon(surf, [(int(x), int(y)) for x, y in pts], (*shade(col, 0.78), a255))
 
         outline = cube and active and color is None and a255 >= 250
         for _, q, n in faces:
@@ -875,7 +895,16 @@ class BoardRenderer:
         if outline and roll is None and dz == 0.0:
             self._draw_marker(surf, (r0 + r1) / 2, (c0 + c1) / 2, height)
 
-    def draw_swallow(self, surf, cells: Sequence[Cell], kind: str, height: float, p: float, color=None) -> None:
+    def draw_swallow(
+        self,
+        surf,
+        cells: Sequence[Cell],
+        kind: str,
+        height: float,
+        p: float,
+        color=None,
+        frame: Optional[Frame3D] = None,
+    ) -> None:
         """Khối chìm xuống hố đích (``p`` 0..1): hố nở ra, khối thu nhỏ và tối dần khi tụt vào trong.
 
         Phần khối còn trên mặt sàn vẽ bình thường; phần đã lọt xuống dưới mặt sàn chỉ hiện ra
@@ -894,7 +923,7 @@ class BoardRenderer:
             gfx.aapolygon(surf, pts, (*theme.GOAL_RING, int(210 * (1 - v) * (1 - 0.5 * p))))
 
         if d < height:
-            self.draw_piece(surf, cells, kind, height - d, color=color, scale=scale, shadow=False)
+            self.draw_piece(surf, cells, kind, height - d, color=color, scale=scale, shadow=False, frame=frame, draw_penguin=True)
         lh = min(d, height)
         if lh > 0.01:
             rim = [(int(x), int(y)) for x, y in self._diamond(cell, 0.41, 0.0)]
@@ -906,8 +935,9 @@ class BoardRenderer:
             if bb.w > 2 and bb.h > 2:
                 sub = self._fxbuf.subsurface(bb)
                 sub.fill((0, 0, 0, 0))
-                self.draw_piece(self._fxbuf, cells, kind, lh, dz=-d, color=color, scale=scale, shadow=False)
-                v = int(255 * max(0.1, 1.0 - 0.85 * min(1.0, d / max(height, 0.1))))
+                self.draw_piece(self._fxbuf, cells, kind, lh, dz=-d, color=color, scale=scale, shadow=False, frame=frame, draw_penguin=False)
+                sink_progress = min(1.0, d / (height + 0.35))
+                v = int(255 * max(0.0, 1.0 - (sink_progress ** 1.5)))
                 sub.fill((v, v, v, 255), special_flags=pygame.BLEND_RGBA_MULT)
                 mask = pygame.Surface(bb.size, pygame.SRCALPHA)
                 local = [(x - bb.x, y - bb.y) for x, y in rim]
@@ -927,18 +957,20 @@ class BoardRenderer:
         pygame.draw.polygon(surf, (255, 255, 255), pts, 2)
 
     @staticmethod
-    def _rotate(verts, box, direction, theta):
+    def _rotate(verts, box, direction, theta, pivot=None):
         r0, c0, r1, c1 = box
         dr, dc = direction
         cos, sin = math.cos(theta), math.sin(theta)
         out = []
         if dr:
-            pivot = r1 if dr > 0 else r0
+            if pivot is None:
+                pivot = r1 if dr > 0 else r0
             for r, c, z in verts:
                 u = dr * (r - pivot)
                 out.append((pivot + dr * (u * cos + z * sin), c, -u * sin + z * cos))
         else:
-            pivot = c1 if dc > 0 else c0
+            if pivot is None:
+                pivot = c1 if dc > 0 else c0
             for r, c, z in verts:
                 u = dc * (c - pivot)
                 out.append((r, pivot + dc * (u * cos + z * sin), -u * sin + z * cos))
