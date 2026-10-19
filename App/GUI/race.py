@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Sequence
 import pygame
 
 from App.GUI import theme
+from App.GUI.models import frame_for_orientation, roll_frame
 from App.GUI.pieces import pieces_of
 from App.GUI.render import BoardRenderer, Camera, smoothstep
 from App.GUI.widgets import draw_text, rrect
@@ -25,7 +26,7 @@ LANE_PATH = [(theme.INFO, theme.ACCENT), ((120, 200, 255), (178, 132, 250))]
 
 
 class Race:
-    def __init__(self, level, rows: Sequence[Dict], cam: Camera, area: Optional[pygame.Rect] = None):
+    def __init__(self, level, rows: Sequence[Dict], cam: Camera, area: Optional[pygame.Rect] = None, arctic_theme: bool = False):
         self.level = level
         self.state = RaceState(level, rows)
         area = area or theme.BOARD_VIEW
@@ -36,7 +37,7 @@ class Race:
             pygame.Rect(area.x + w + gap, area.y, w - 10, area.h),
         ]
         self.renderers: List[BoardRenderer] = [
-            BoardRenderer(level, area=r.inflate(-16, -90).move(0, 30), cam=cam) for r in self.lane_rects
+            BoardRenderer(level, area=r.inflate(-16, -90).move(0, 30), cam=cam, arctic_theme=arctic_theme) for r in self.lane_rects
         ]
         self.paths = [path_steps(level.problem, lane.actions) for lane in self.state.lanes]
         self.restart()
@@ -48,6 +49,7 @@ class Race:
         for r in self.renderers:
             r.set_bridges(initial, snap=True)
             r.particles.clear()
+        self.lane_frames = [frame_for_orientation(self.level.problem.initial_state.orientation) for _ in range(2)]
         self.tween: List[Optional[dict]] = [None, None]
         self.fx: List[Optional[float]] = [None, None]  # thời gian từ lúc làn về đích (hiệu ứng chìm xuống hố)
         self.wait = 0.5
@@ -66,6 +68,8 @@ class Race:
             tw["t"] += dt * speed
             if tw["t"] >= ROLL_DUR:
                 self.renderers[i].set_bridges(tw["bridges"])
+                if "action" in tw:
+                    self.lane_frames[i] = roll_frame(self.lane_frames[i], tw["action"])
                 self.tween[i] = None
         for i, lane in enumerate(self.state.lanes):
             if lane.finished and self.tween[i] is None and self.fx[i] is None:
@@ -89,8 +93,9 @@ class Race:
                 moving, statics = pcs[k], [pcs[1 - k]]
             else:
                 moving, statics = pcs[0], []
+            moving["frame"] = self.lane_frames[i]
             self.tween[i] = {
-                "piece": moving, "statics": statics, "dir": DELTAS[ev.action], "t": 0.0,
+                "piece": moving, "statics": statics, "dir": DELTAS[ev.action], "action": ev.action, "t": 0.0,
                 "bridges": ev.new.bridges_state,
             }
         self.wait = 0.12 / max(0.1, speed)
@@ -98,8 +103,9 @@ class Race:
     # ------------------------------------------------------------------ vẽ
     def _draw_piece(self, surf, i: int, piece: dict, **kw) -> None:
         color = LANE_COLORS[i] if piece["kind"] == "block" else None
+        frame = kw.pop("frame", piece.get("frame"))
         self.renderers[i].draw_piece(
-            surf, piece["cells"], piece["kind"], piece["height"], active=piece["active"], color=color, **kw
+            surf, piece["cells"], piece["kind"], piece["height"], active=piece["active"], color=color, frame=frame, **kw
         )
 
     def draw(self, surf, mouse, show_path: bool = True) -> None:
@@ -158,4 +164,5 @@ class Race:
             self._draw_piece(surf, i, piece, dz=-smoothstep(f / 0.7) * 2.1, alpha=1.0 - max(0.0, (f / 0.7 - 0.45) / 0.55))
             return
         for pc in sorted(pieces_of(lane.session.state), key=lambda q: self.renderers[i].iso.order(*q["cells"][0])):
+            pc["frame"] = self.lane_frames[i]
             self._draw_piece(surf, i, pc)

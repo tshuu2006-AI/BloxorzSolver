@@ -22,6 +22,7 @@ DEFAULTS: Dict[str, Any] = {
     "sound_on": True,           # hiệu ứng âm thanh (phím M để tắt/bật)
     "volume": 0.6,
     "tips_seen": [],
+    "arctic_theme": False,      # Theme Bắc Cực: Khối băng chứa chim cánh cụt, sàn tuyết, cầu gỗ
 }
 
 _NUMERIC_RANGE = {"replay_speed": (0.5, 4.0), "tilt_deg": (0.0, 45.0), "volume": (0.0, 1.0)}

@@ -18,6 +18,7 @@ import pygame.gfxdraw as gfx
 
 from App.Components.features import SwitchType, TileType
 from App.GUI import theme
+from App.GUI.models import Frame3D, INITIAL_FRAME, frame_for_orientation, get_penguin_mesh
 from App.GUI.theme import mix, shade
 
 Cell = Tuple[int, int]
@@ -200,7 +201,7 @@ class Particle:
 
 class BoardRenderer:
     def __init__(self, level, area: Optional[pygame.Rect] = None, cam: Optional[Camera] = None,
-                 min_fit: float = 24.0):
+                 min_fit: float = 24.0, arctic_theme: bool = False):
         self.level = level
         self.min_fit = min_fit  # cạnh ô nhỏ nhất cho phép (ảnh xem trước cần nhỏ hơn mặc định)
         self.problem = level.problem
@@ -215,17 +216,27 @@ class BoardRenderer:
         # Tấm sàn fragile hiện đang rơi cùng block; không vẽ lại ở mặt bàn.
         self.falling_fragile_cells: set[Cell] = set()
         self._fxbuf: Optional[pygame.Surface] = None
+        self.arctic_theme = arctic_theme
         self.set_camera(cam or Camera())
 
         n_bridges = len(self.problem.bridge_indices)
         self.bridge_color = [theme.TEXT_DIM] * n_bridges
         self.bridge_cell = [None] * n_bridges
+        palette = theme.ARCTIC_BRIDGE_COLORS if self.arctic_theme else theme.BRIDGE_COLORS
         for cell, idx in self.problem.bridge_indices.items():
             g = level.bridge_group_of(cell)
-            self.bridge_color[idx] = theme.BRIDGE_COLORS[g % len(theme.BRIDGE_COLORS)] if g >= 0 else theme.TEXT_DIM
+            self.bridge_color[idx] = palette[g % len(palette)] if g >= 0 else theme.TEXT_DIM
             self.bridge_cell[idx] = cell
         self.bridge_v = [1.0 if b else 0.0 for b in self.problem.initial_state.bridges_state]
         self.bridge_target = list(self.bridge_v)
+
+    def set_arctic_theme(self, on: bool) -> None:
+        """Chuyển đổi tức thì giữa Theme Mặc Định và Theme Bắc Cực (Chim Cánh Cụt & Băng Tuyết)."""
+        self.arctic_theme = on
+        palette = theme.ARCTIC_BRIDGE_COLORS if on else theme.BRIDGE_COLORS
+        for cell, idx in self.problem.bridge_indices.items():
+            g = self.level.bridge_group_of(cell)
+            self.bridge_color[idx] = palette[g % len(palette)] if g >= 0 else theme.TEXT_DIM
 
     # ------------------------------------------------------------------ cập nhật
     def set_camera(self, cam: Camera) -> None:
@@ -263,7 +274,11 @@ class BoardRenderer:
 
     def burst(self, cell: Cell, n: int = 46, colors=None, z: float = 0.2) -> None:
         x, y = self.iso.p(cell[0] + 0.5, cell[1] + 0.5, z)
-        colors = colors or [theme.ACCENT, theme.GOAL_RING, (255, 255, 255), theme.GOOD]
+        if colors is None:
+            if self.arctic_theme:
+                colors = [(255, 255, 255), (180, 235, 255), theme.ARCTIC_GOAL_RING, (215, 245, 255)]
+            else:
+                colors = [theme.ACCENT, theme.GOAL_RING, (255, 255, 255), theme.GOOD]
         for _ in range(n):
             ang = random.uniform(0, math.tau)
             sp = random.uniform(120, 460)
@@ -370,6 +385,23 @@ class BoardRenderer:
     def _draw_floor(self, surf, cell, tile):
         r, c = cell
         checker = (r + c) % 2 == 0
+        if self.arctic_theme:
+            if tile == TileType.FRAGILE:
+                top = theme.ARCTIC_FRAGILE_TOP if checker else theme.ARCTIC_FRAGILE_TOP_ALT
+                self._prism(surf, r, c, top)
+                self._draw_cracks(surf, cell)
+                return
+            top = theme.ARCTIC_FLOOR_TOP if checker else theme.ARCTIC_FLOOR_TOP_ALT
+            if cell == self.start_cell:
+                top = theme.ARCTIC_START_TOP
+            self._prism(surf, r, c, top)
+            if cell == self.start_cell:
+                gfx.aapolygon(
+                    surf, [(int(x), int(y)) for x, y in self._diamond(cell, 0.36)],
+                    (*theme.shade(theme.ARCTIC_START_TOP, 1.4), 180),
+                )
+            return
+
         if tile == TileType.FRAGILE:
             top = theme.FRAGILE_TOP if checker else theme.FRAGILE_TOP_ALT
             self._prism(surf, r, c, top)
@@ -388,7 +420,7 @@ class BoardRenderer:
     def _draw_cracks(self, surf, cell, dz=0.01):
         p = self.iso.p
         r, c = cell
-        dark = (112, 56, 20)
+        dark = (42, 105, 148) if self.arctic_theme else (112, 56, 20)
         for pts in (
             [(0.18, 0.30), (0.40, 0.46), (0.36, 0.70), (0.58, 0.82)],
             [(0.40, 0.46), (0.66, 0.40), (0.84, 0.54)],
@@ -403,11 +435,30 @@ class BoardRenderer:
         dz = -(progress ** 2) * 6.0
         alpha = max(0, min(255, int(255 * (1.0 - progress ** 1.4))))
         self._prism(surf, r, c, top, dz=dz, alpha=alpha)
+        dark = (42, 105, 148) if self.arctic_theme else (112, 56, 20)
         if alpha > 20:
             self._draw_cracks(surf, cell, dz=dz + 0.01)
+            polyline(surf, dark, [p(r + a, c + b, 0.01) for a, b in pts], 2)
+            if self.arctic_theme:
+                # Đường viền nứt trắng sáng giả lập bề mặt tảng băng rạn nứt
+                polyline(surf, (255, 255, 255), [p(r + a + 0.01, c + b + 0.01, 0.014) for a, b in pts], 1)
 
     def _draw_goal(self, surf, cell):
         self._draw_floor(surf, cell, TileType.FLOOR)
+        if self.arctic_theme:
+            # Lỗ băng sâu mở ra vùng nước bắc cực thẫm màu
+            rings = [(0.82, (26, 48, 82)), (0.68, (14, 32, 60)), (0.52, (8, 18, 40)), (0.34, (2, 6, 18))]
+            for size, col in rings:
+                poly(surf, col, self._diamond(cell, size / 2, 0.015))
+            pulse = 0.5 + 0.5 * math.sin(self.time * 3.0)
+            for grow, a in ((0.0, 210), (0.05, 120), (0.10, 60)):
+                gfx.aapolygon(
+                    surf,
+                    [(int(x), int(y)) for x, y in self._diamond(cell, 0.41 + grow * (0.6 + pulse), 0.02)],
+                    (*theme.ARCTIC_GOAL_RING, int(a * (0.55 + 0.45 * pulse))),
+                )
+            return
+
         rings = [(0.82, (46, 52, 74)), (0.68, (28, 32, 48)), (0.52, (14, 16, 26)), (0.34, (5, 6, 11))]
         for size, col in rings:
             poly(surf, col, self._diamond(cell, size / 2, 0.015))
@@ -425,22 +476,40 @@ class BoardRenderer:
         col = self.bridge_color[idx]
         r, c = cell
         if v < 0.98:
+            ghost_col = (130, 220, 255) if self.arctic_theme else col
             ghost = [(int(x), int(y)) for x, y in self._diamond(cell, 0.5, 0.0)]
-            gfx.filled_polygon(surf, ghost, (*col, int(34 * (1 - v))))
-            gfx.aapolygon(surf, ghost, (*col, int(170 * (1 - v) + 30)))
+            gfx.filled_polygon(surf, ghost, (*ghost_col, int(34 * (1 - v))))
+            gfx.aapolygon(surf, ghost, (*ghost_col, int(170 * (1 - v) + 30)))
             inner = [(int(x), int(y)) for x, y in self._diamond(cell, 0.26, 0.0)]
-            gfx.aapolygon(surf, inner, (*col, int(90 * (1 - v))))
+            gfx.aapolygon(surf, inner, (*ghost_col, int(90 * (1 - v))))
         if v > 0.03:
-            top = mix(theme.FLOOR_TOP, col, 0.62)
-            self._prism(surf, r, c, top, dz=-(1 - v) * 0.6, alpha=int(255 * v))
-            if v > 0.6:
-                a = int(200 * v)
-                for off in (0.28, 0.5, 0.72):
+            if self.arctic_theme:
+                # Cầu gỗ Bắc Cực: ván gỗ màu nâu ấm áp
+                checker = (r + c) % 2 == 0
+                wood_top = theme.ARCTIC_WOOD_TOP if checker else theme.ARCTIC_WOOD_TOP_ALT
+                top = mix(wood_top, col, 0.25)
+                self._prism(surf, r, c, top, dz=-(1 - v) * 0.6, alpha=int(255 * v))
+                if v > 0.6:
+                    a = int(220 * v)
                     p = self.iso.p
-                    gfx.line(
-                        surf, *map(int, p(r + off, c + 0.16, 0.012)), *map(int, p(r + off, c + 0.84, 0.012)),
-                        (*shade(col, 1.25), a),
-                    )
+                    # Các thanh ván gỗ ngang và đinh tán ở hai đầu
+                    for off in (0.28, 0.5, 0.72):
+                        p1 = p(r + off, c + 0.08, 0.012)
+                        p2 = p(r + off, c + 0.92, 0.012)
+                        pygame.draw.line(surf, (64, 40, 20), (int(p1[0]), int(p1[1])), (int(p2[0]), int(p2[1])), 2)
+                        gfx.filled_circle(surf, int(p1[0]), int(p1[1]), 2, (185, 145, 90, a))
+                        gfx.filled_circle(surf, int(p2[0]), int(p2[1]), 2, (185, 145, 90, a))
+            else:
+                top = mix(theme.FLOOR_TOP, col, 0.62)
+                self._prism(surf, r, c, top, dz=-(1 - v) * 0.6, alpha=int(255 * v))
+                if v > 0.6:
+                    a = int(200 * v)
+                    for off in (0.28, 0.5, 0.72):
+                        p = self.iso.p
+                        gfx.line(
+                            surf, *map(int, p(r + off, c + 0.16, 0.012)), *map(int, p(r + off, c + 0.84, 0.012)),
+                            (*shade(col, 1.25), a),
+                        )
 
     # ------------------------------------------------------------------ công tắc
     def _draw_switch(self, surf, cell, sw):
@@ -449,6 +518,16 @@ class BoardRenderer:
             col = self.bridge_color[idx]
         else:
             col = theme.SPLIT_COLOR
+
+        if self.arctic_theme:
+            # Màu đá quý rực rỡ nổi bật trên nền tuyết trắng
+            if sw.switch_type == SwitchType.SOFT:
+                col = (255, 65, 105)  # Ruby đỏ
+            elif sw.switch_type == SwitchType.HEAVY:
+                col = (255, 190, 35)  # Hổ phách vàng
+            else:
+                col = (195, 105, 255)  # Thạch anh tím
+
         p = self.iso.p
         cr, cc = cell[0] + 0.5, cell[1] + 0.5
         if sw.switch_type == SwitchType.SOFT:
@@ -630,6 +709,7 @@ class BoardRenderer:
         height: float,
         *,
         roll: Optional[Tuple[Tuple[int, int], float]] = None,
+        frame: Optional[Frame3D] = None,
         dz: float = 0.0,
         alpha: float = 1.0,
         active: bool = True,
@@ -640,6 +720,7 @@ class BoardRenderer:
         """Vẽ một khối 3D phủ ``cells`` cao ``height`` (đơn vị ô).
 
         ``roll = (hướng, theta)`` xoay khối quanh cạnh đáy phía hướng lăn.
+        ``frame = (head, front, right)`` xác định hướng 3D của chim cánh cụt bên trong.
         """
         r0, c0, r1, c1 = box = piece_box(cells)
         if roll is None and dz == 0.0:
@@ -700,20 +781,97 @@ class BoardRenderer:
             faces.append((_dot(fc, self.iso.view), q, n))
         faces.sort(key=lambda item: item[0])
 
+        # ----------------- VẼ CHIM CÁNH CỤT BÊN TRONG (ARCTIC THEME) -----------------
+        if self.arctic_theme:
+            is_cube = kind != "block"
+            p_verts, p_faces, p_colors = get_penguin_mesh(is_cube=is_cube)
+            if frame is None:
+                if is_cube or len(cells) == 1:
+                    actual_frame = INITIAL_FRAME
+                else:
+                    c_list = list(cells)
+                    if c_list[0][0] != c_list[1][0]:
+                        actual_frame = ((1, 0, 0), (0, 0, -1), (0, 1, 0))  # Vertical dọc theo R
+                    else:
+                        actual_frame = ((0, 1, 0), (1, 0, 0), (0, 0, -1))  # Horizontal dọc theo C
+            else:
+                actual_frame = frame
+
+            head_vec, front_vec, right_vec = actual_frame
+
+            # Tâm của khối trong không gian thế giới (r, c, z)
+            box_cx = (r0 + r1) / 2.0
+            box_cy = (c0 + c1) / 2.0
+            box_cz = height / 2.0
+
+            # Biến đổi từng đỉnh của chim theo hệ trục 3D của khối:
+            abs_pverts = []
+            for vr, vc, vz in p_verts:
+                pr = box_cx + (vr * front_vec[0] + vc * right_vec[0] + vz * head_vec[0]) * scale
+                pc = box_cy + (vr * front_vec[1] + vc * right_vec[1] + vz * head_vec[1]) * scale
+                pz = box_cz + (vr * front_vec[2] + vc * right_vec[2] + vz * head_vec[2]) * scale
+                abs_pverts.append((pr, pc, pz))
+
+            if roll is not None:
+                abs_pverts = self._rotate(abs_pverts, box, *roll)
+            abs_pverts = [(r, c, z + dz) for r, c, z in abs_pverts]
+
+            p_centroid = (
+                sum(v[0] for v in abs_pverts) / max(1, len(abs_pverts)),
+                sum(v[1] for v in abs_pverts) / max(1, len(abs_pverts)),
+                sum(v[2] for v in abs_pverts) / max(1, len(abs_pverts)),
+            )
+            p_faces_to_draw = []
+            for f_idx, f in enumerate(p_faces):
+                q = [abs_pverts[i] for i in f]
+                if len(q) < 3:
+                    continue
+                n = _norm(_cross(_sub(q[1], q[0]), _sub(q[2], q[0])))
+                fc = (sum(v[0] for v in q) / len(q), sum(v[1] for v in q) / len(q), sum(v[2] for v in q) / len(q))
+                if _dot(n, _sub(fc, p_centroid)) < 0:
+                    n = (-n[0], -n[1], -n[2])
+                if _dot(n, self.iso.view) <= 1e-6:
+                    continue
+                p_faces_to_draw.append((_dot(fc, self.iso.view), q, n, p_colors[f_idx]))
+
+            p_faces_to_draw.sort(key=lambda item: item[0])
+            for _, q, n, fcol in p_faces_to_draw:
+                lum = 0.52 + 0.62 * max(0.0, _dot(n, self.iso.light))
+                col = shade(fcol, lum)
+                pts = [self.iso.p(*v) for v in q]
+                poly(surf, (*col, a255), pts)
+                gfx.aapolygon(surf, [(int(x), int(y)) for x, y in pts], (*shade(col, 0.78), a255))
+
         outline = cube and active and color is None and a255 >= 250
         for _, q, n in faces:
-            lum = 0.50 + 0.66 * max(0.0, _dot(n, self.iso.light))
-            col = shade(base, lum)
-            pts = [self.iso.p(*v) for v in q]
-            poly(surf, (*col, a255), pts, (*shade(col, 0.72), a255))
-            cx = sum(x for x, _ in pts) / 4
-            cy = sum(y for _, y in pts) / 4
-            inner = [(cx + (x - cx) * 0.80, cy + (y - cy) * 0.80) for x, y in pts]
-            gfx.filled_polygon(
-                surf, [(int(x), int(y)) for x, y in inner], (*shade(col, 1.14), int(a255 * 0.42))
-            )
-            if outline:  # khối đang điều khiển: viền trắng dày để nổi bật
-                pygame.draw.polygon(surf, (255, 255, 255), [(int(x), int(y)) for x, y in pts], 3)
+            if self.arctic_theme:
+                # Khối băng trong suốt bao bọc bên ngoài
+                lum = 0.60 + 0.55 * max(0.0, _dot(n, self.iso.light))
+                ice_base = theme.ARCTIC_ICE_BLOCK if active else (150, 195, 225)
+                col = shade(ice_base, lum)
+                pts = [self.iso.p(*v) for v in q]
+                poly(surf, (*col, int(130 * alpha)), pts)
+                gfx.aapolygon(surf, [(int(x), int(y)) for x, y in pts], (255, 255, 255, int(220 * alpha)))
+                polyline(surf, (255, 255, 255, int(180 * alpha)), pts, width=2)
+                cx = sum(x for x, _ in pts) / 4
+                cy = sum(y for _, y in pts) / 4
+                glint = [(cx + (x - cx) * 0.72, cy + (y - cy) * 0.72) for x, y in pts]
+                gfx.filled_polygon(surf, [(int(x), int(y)) for x, y in glint], (255, 255, 255, int(48 * alpha)))
+                if outline:
+                    pygame.draw.polygon(surf, (120, 240, 255), [(int(x), int(y)) for x, y in pts], 3)
+            else:
+                lum = 0.50 + 0.66 * max(0.0, _dot(n, self.iso.light))
+                col = shade(base, lum)
+                pts = [self.iso.p(*v) for v in q]
+                poly(surf, (*col, a255), pts, (*shade(col, 0.72), a255))
+                cx = sum(x for x, _ in pts) / 4
+                cy = sum(y for _, y in pts) / 4
+                inner = [(cx + (x - cx) * 0.80, cy + (y - cy) * 0.80) for x, y in pts]
+                gfx.filled_polygon(
+                    surf, [(int(x), int(y)) for x, y in inner], (*shade(col, 1.14), int(a255 * 0.42))
+                )
+                if outline:  # khối đang điều khiển: viền trắng dày để nổi bật
+                    pygame.draw.polygon(surf, (255, 255, 255), [(int(x), int(y)) for x, y in pts], 3)
         if outline and roll is None and dz == 0.0:
             self._draw_marker(surf, (r0 + r1) / 2, (c0 + c1) / 2, height)
 

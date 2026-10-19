@@ -24,6 +24,7 @@ from App.Components.level_loader import Level, load_levels
 from App.GUI import theme
 from App.GUI.audio import Audio
 from App.GUI.compare_view import CompareView
+from App.GUI.models import INITIAL_FRAME, frame_for_orientation, roll_frame
 from App.GUI.pieces import pieces_of
 from App.GUI.race import LANE_COLORS, Race
 from App.GUI.render import BoardRenderer, Camera, smoothstep
@@ -182,6 +183,9 @@ class App:
         self.path_steps: List[dict] = []
         self.replay_done: List[str] = []
         self.step_req = 0
+        self.block_frame = INITIAL_FRAME
+        self.cube_frames = [INITIAL_FRAME, INITIAL_FRAME]
+        self.frame_history = []
         self.cam = Camera()
         self.cam_dirty = False
         self.cam_drag = None  # "rotate" | "pan" khi đang kéo chuột
@@ -251,26 +255,31 @@ class App:
 
         # --- tab SETTINGS: tuỳ chọn nâng cao, gom theo nhóm ---
         S = self.settings
-        self.settings_labels = [("DISPLAY", 168), ("CAMERA", 398), ("HELP", 552), ("SOUND", 700), ("TOOLS", 860)]
-        row = 46
+        self.settings_labels = [("DISPLAY", 168), ("CAMERA", 416), ("HELP", 564), ("SOUND", 708), ("TOOLS", 860)]
+        row = 44
+        self.arctic_toggle = Toggle(
+            (x0, 190, w, 44), "Arctic theme (Penguin)", S.arctic_theme, self._set_arctic_theme,
+            hint="Ice block with 3D penguin, snow & wooden bridge",
+        )
         self.toggles = [
-            Toggle((x0, 190, w, 44), "Move-keys compass", S.show_compass, lambda v: S.set("show_compass", v)),
-            Toggle((x0, 190 + row, w, 44), "Camera help card", S.show_camera_help, lambda v: S.set("show_camera_help", v)),
-            Toggle((x0, 190 + 2 * row, w, 44), "Floor arrows around the block", S.show_floor_arrows, lambda v: S.set("show_floor_arrows", v)),
-            Toggle((x0, 190 + 3 * row, w, 44), "Switch link lines", S.show_link_lines, lambda v: S.set("show_link_lines", v),
+            self.arctic_toggle,
+            Toggle((x0, 190 + row, w, 44), "Move-keys compass", S.show_compass, lambda v: S.set("show_compass", v)),
+            Toggle((x0, 190 + 2 * row, w, 44), "Camera help card", S.show_camera_help, lambda v: S.set("show_camera_help", v)),
+            Toggle((x0, 190 + 3 * row, w, 44), "Floor arrows around the block", S.show_floor_arrows, lambda v: S.set("show_floor_arrows", v)),
+            Toggle((x0, 190 + 4 * row, w, 44), "Switch link lines", S.show_link_lines, lambda v: S.set("show_link_lines", v),
                    hint="Dashed line from each switch to its bridges"),
         ]
-        self.tilt_slider = Slider((x0 + 4, 456, w - 8, 24), 0.0, 45.0, S.tilt_deg, "Default tilt", fmt="{:.0f}\u00b0")
-        self.btn_cam_reset = Button((x0, 490, w, 44), "Reset camera  (C)", self._reset_camera, font_size=19)
-        self.tip_toggle = Toggle((x0, 572, w, 44), "Show tutorial tips", S.show_tips, lambda v: S.set("show_tips", v))
+        self.tilt_slider = Slider((x0 + 4, 468, w - 8, 24), 0.0, 45.0, S.tilt_deg, "Default tilt", fmt="{:.0f}\u00b0")
+        self.btn_cam_reset = Button((x0, 502, w, 44), "Reset camera  (C)", self._reset_camera, font_size=19)
+        self.tip_toggle = Toggle((x0, 584, w, 44), "Show tutorial tips", S.show_tips, lambda v: S.set("show_tips", v))
         self.toggles.append(self.tip_toggle)
-        self.btn_tips_again = Button((x0, 618, w, 40), "Show all tips again", self._show_tips_again, font_size=18)
+        self.btn_tips_again = Button((x0, 630, w, 40), "Show all tips again", self._show_tips_again, font_size=18)
         self.sound_toggle = Toggle(
-            (x0, 722, w, 44), "Sound effects", S.sound_on, lambda v: self._set_sound(v, toast=False),
+            (x0, 728, w, 44), "Sound effects", S.sound_on, lambda v: self._set_sound(v, toast=False),
             hint="Press M to mute or unmute",
         )
         self.toggles.append(self.sound_toggle)
-        self.volume_slider = Slider((x0 + 4, 812, w - 8, 24), 0.0, 1.0, S.volume, "Volume", fmt="{:.0%}")
+        self.volume_slider = Slider((x0 + 4, 814, w - 8, 24), 0.0, 1.0, S.volume, "Volume", fmt="{:.0%}")
         hw = (w - 12) // 2
         self.btn_shot = Button((x0, 884, hw, 50), "Save screenshot  (F12)", self.save_screenshot, font_size=17)
         self.btn_reset_progress = Button((x0 + hw + 12, 884, hw, 50), "Reset progress", self._reset_progress_click, font_size=17)
@@ -337,6 +346,13 @@ class App:
         self.cam.reset()
         self.cam_dirty = True
 
+    def _set_arctic_theme(self, on: bool):
+        self.settings.set("arctic_theme", on)
+        self.renderer.set_arctic_theme(on)
+        self.thumbs.clear()  # làm mới thumbnail nếu có
+        self.toast("Arctic Theme (Penguin) ON" if on else "Classic Theme Restored", theme.GOOD if on else theme.INFO, 1.8)
+        self.audio.play("swap")
+
     def _set_sound(self, on: bool, toast: bool = True):
         self.audio.set_enabled(on)
         self.settings.set("sound_on", on)
@@ -390,7 +406,7 @@ class App:
         self.level_idx = index
         self.level = self.levels[index]
         self.session = GameSession(self.level)
-        self.renderer = BoardRenderer(self.level, cam=self.cam)
+        self.renderer = BoardRenderer(self.level, cam=self.cam, arctic_theme=self.settings.arctic_theme)
         self.renderer.set_bridges(self.session.state.bridges_state, snap=True)
         self.anims: Deque[Anim] = deque()
         self.queued: Optional[str] = None
@@ -410,11 +426,17 @@ class App:
         self._tip_pending = True
         self.toasts.clear()
         self.picker_open = False
+        self.block_frame = frame_for_orientation(self.level.problem.initial_state.orientation)
+        self.cube_frames = [INITIAL_FRAME, INITIAL_FRAME]
+        self.frame_history.clear()
         self.toast(self.level.name, theme.group_color(self.level.group), 2.0)
 
     def restart(self):
         self._reset_play()
         self.session.reset()
+        self.block_frame = frame_for_orientation(self.level.problem.initial_state.orientation)
+        self.cube_frames = [INITIAL_FRAME, INITIAL_FRAME]
+        self.frame_history.clear()
         self.renderer.set_bridges(self.session.state.bridges_state)
 
     def _reset_play(self):
@@ -434,6 +456,8 @@ class App:
         self.replay_done = []
         if self.session.undo():
             self.lost_cells = None
+            if self.frame_history:
+                self.block_frame, self.cube_frames = self.frame_history.pop()
             self.renderer.set_bridges(self.session.state.bridges_state)
             self.renderer.clear_fragile_falls()
 
@@ -464,7 +488,11 @@ class App:
         if not from_replay:
             self.replay.clear()  # người chơi can thiệp: dừng replay
             self.replay_done.clear()
+        saved_block_frame = self.block_frame
+        saved_cube_frames = list(self.cube_frames)
         ev = self.session.apply(action)
+        if ev.outcome not in (Outcome.IGNORED, Outcome.BLOCKED):
+            self.frame_history.append((saved_block_frame, saved_cube_frames))
         self._present(ev)
         return ev
 
@@ -485,8 +513,11 @@ class App:
         if prev.is_split:
             i = prev.active_block
             moving, statics = pcs[i], [pcs[1 - i]]
+            moving["frame"] = self.cube_frames[i]
+            statics[0]["frame"] = self.cube_frames[1 - i]
         else:
             moving, statics = pcs[0], []
+            moving["frame"] = self.block_frame
         direction = DELTAS[ev.action]
 
         def after_roll():
@@ -504,15 +535,30 @@ class App:
                 if ev.merged:
                     self.toast("Cubes merged back into a block", theme.CUBE)
 
+            if ev.merged:
+                self.block_frame = frame_for_orientation(ev.new.orientation)
+            elif ev.teleported:
+                self.cube_frames = [INITIAL_FRAME, INITIAL_FRAME]
+            elif prev.is_split:
+                self.cube_frames[prev.active_block] = roll_frame(self.cube_frames[prev.active_block], ev.action)
+            else:
+                self.block_frame = roll_frame(self.block_frame, ev.action)
+
         anims: List[Anim] = [RollAnim(moving, direction, statics=statics, on_finish=after_roll)]
         if o == Outcome.FELL:
             cells = ev.fall_cells
+            fell_frame = (
+                roll_frame(self.cube_frames[prev.active_block], ev.action)
+                if prev.is_split
+                else roll_frame(self.block_frame, ev.action)
+            )
             if prev.is_split:
-                piece = {"cells": cells, "kind": "cube", "height": 1.0, "active": True}
+                piece = {"cells": cells, "kind": "cube", "height": 1.0, "active": True, "frame": fell_frame}
             else:
                 piece = {
                     "cells": cells, "kind": "block",
                     "height": 2.0 if len(cells) == 1 else 1.0, "active": True,
+                    "frame": fell_frame,
                 }
             self.lost_cells = moving["cells"]
             fragile_tiles = ev.fragile_fall_cells
@@ -528,7 +574,7 @@ class App:
             new_best = not self.used_solver and self.progress.record_win(self.level.name, self.session.moves)
             if new_best:
                 self.toast(f"New best: {self.session.moves} moves", theme.GOOD, 3.0)
-            piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True}
+            piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True, "frame": INITIAL_FRAME}
 
             def swallowed():
                 self.renderer.burst(goal)
@@ -539,8 +585,11 @@ class App:
 
             anims.append(SinkAnim(piece, on_start=swallowed))
         elif ev.teleported:
+            spawn_pcs = pieces_of(ev.new)
+            for pc in spawn_pcs:
+                pc["frame"] = INITIAL_FRAME
             anims.append(SpawnAnim(
-                pieces_of(ev.new),
+                spawn_pcs,
                 on_start=lambda: self.toast("Split! Press Space to swap cubes", theme.SPLIT_COLOR, 3.2),
             ))
         self.anims.extend(anims)
@@ -726,6 +775,8 @@ class App:
             if self.session.undo():
                 self.replay.appendleft(action)
                 self.lost_cells = None
+                if self.frame_history:
+                    self.block_frame, self.cube_frames = self.frame_history.pop()
                 self.renderer.set_bridges(self.session.state.bridges_state)
 
     def _run_replay_action(self):
@@ -980,9 +1031,10 @@ class App:
 
     # ------------------------------------------------------------------ vẽ
     def draw_piece(self, surf, piece, **kw):
+        frame = kw.pop("frame", piece.get("frame"))
         self.renderer.draw_piece(
             surf, piece["cells"], piece["kind"], piece["height"],
-            active=piece["active"], **kw,
+            active=piece["active"], frame=frame, **kw,
         )
 
     def _draw_pieces(self, surf):
@@ -1017,6 +1069,11 @@ class App:
             controlled = (st.get_occupied_cells()[st.active_block],) if st.is_split else st.get_occupied_cells()
             rd.draw_direction_hints(surf, controlled, self.key_flash)
         for pc in sorted(pieces, key=lambda q: rd.iso.order(*q["cells"][0])):
+            if pc["kind"] == "cube" and len(pieces) == 2:
+                idx = 0 if pc["cells"][0] == st.get_occupied_cells()[0] else 1
+                pc["frame"] = self.cube_frames[idx]
+            else:
+                pc["frame"] = self.block_frame
             if pc["kind"] == "cube" and pc["active"] and len(pieces) == 2:
                 rd.draw_floor_ring(surf, pc["cells"][0], theme.TEXT)
             self.draw_piece(surf, pc)
@@ -1244,7 +1301,7 @@ class App:
         self.compare_open = False
         self.restart()
         self.tip = None
-        self.race = Race(self.level, [row_a, row_b], self.cam)
+        self.race = Race(self.level, [row_a, row_b], self.cam, arctic_theme=self.settings.arctic_theme)
         self.race_paused = False
 
     def exit_race(self):
@@ -1460,7 +1517,8 @@ class App:
         # Cùng bộ vẽ isometric với bàn chơi, thu nhỏ vào ô ảnh: bố cục, cầu và công tắc giống hệt khi chơi.
         surf = pygame.Surface(size, pygame.SRCALPHA)
         rd = BoardRenderer(
-            self.levels[i], area=pygame.Rect(8, 6, size[0] - 16, size[1] - 12), cam=Camera(), min_fit=4.0
+            self.levels[i], area=pygame.Rect(8, 6, size[0] - 16, size[1] - 12), cam=Camera(), min_fit=4.0,
+            arctic_theme=self.settings.arctic_theme,
         )
         rd.draw_board(surf, show_hints=False)
         self.thumbs[i] = surf

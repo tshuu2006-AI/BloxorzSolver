@@ -68,6 +68,38 @@ BRIDGE_COLORS = [
 ]
 SPLIT_COLOR = (120, 236, 232)
 
+# --- Theme Bắc Cực (Arctic / Penguin Theme) ---
+ARCTIC_FLOOR_TOP = (226, 240, 254)
+ARCTIC_FLOOR_TOP_ALT = (212, 230, 248)
+ARCTIC_START_TOP = (185, 228, 255)
+ARCTIC_FLOOR_SIDE_R = (84, 122, 162)
+ARCTIC_FLOOR_SIDE_C = (64, 98, 134)
+
+ARCTIC_FRAGILE_TOP = (165, 226, 242)
+ARCTIC_FRAGILE_TOP_ALT = (150, 215, 235)
+ARCTIC_FRAGILE_SIDE_R = (72, 140, 172)
+ARCTIC_FRAGILE_SIDE_C = (54, 110, 138)
+
+ARCTIC_WOOD_TOP = (144, 94, 56)
+ARCTIC_WOOD_TOP_ALT = (130, 82, 46)
+ARCTIC_WOOD_SIDE_R = (92, 58, 34)
+ARCTIC_WOOD_SIDE_C = (72, 44, 24)
+
+ARCTIC_BRIDGE_COLORS = [
+    (156, 102, 60),   # Gỗ sồi
+    (180, 120, 75),   # Gỗ thông
+    (130, 80, 45),    # Gỗ óc chó
+    (195, 135, 85),   # Gỗ phong
+    (140, 75, 40),    # Gỗ tuyết tùng
+    (165, 110, 65),   # Gỗ tếch
+    (120, 70, 38),    # Gỗ gụ
+    (175, 125, 78),   # Gỗ bạch đàn
+]
+
+ARCTIC_ICE_BLOCK = (185, 235, 255)
+ARCTIC_GOAL_RING = (90, 248, 220)
+
+
 GROUP_COLORS = {
     "simple": (96, 214, 140),
     "fragile": (255, 160, 80),
