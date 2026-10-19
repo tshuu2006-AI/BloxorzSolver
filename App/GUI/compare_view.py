@@ -4,13 +4,13 @@ thanh so sánh theo thang log, bấm vào một dòng để xem lại lời gi�
 from __future__ import annotations
 
 import math
-from typing import Callable, Dict, List, Optional, Sequence
+from typing import Callable, Dict, List
 
 import pygame
 
-from App.Game.compare import best_marks, summary_line, usable
 from App.GUI import theme
 from App.GUI.widgets import Button, draw_text, rrect, wrap_text
+from App.Game.compare import best_marks, summary_line, usable
 
 PANEL = pygame.Rect(150, 110, 1620, 860)
 ROW_H = 84
