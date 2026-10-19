@@ -1,9 +1,11 @@
 
 from enum import IntEnum
-from typing import NamedTuple, Optional, Tuple
+from typing import Optional, Tuple
 
 
 class Orientation(IntEnum):
+    """Block configuration: upright, lying across cells, or split."""
+
     STANDING = 0
     HORIZONTAL = 1  # (r, c) và (r, c + 1)
     VERTICAL = 2  # (r, c) và (r + 1, c)
@@ -65,18 +67,22 @@ class State:
 
     @property
     def orientation(self) -> Orientation:
+        """Return the block's current orientation."""
         return self._orientation
 
     @property
     def is_split(self) -> bool:
+        """Return whether the block is currently split into two cubes."""
         return self._orientation == Orientation.SPLIT
 
     @property
     def active_block(self) -> int:
+        """Return the controlled cube index when split (otherwise zero)."""
         return self._active_block
 
     @property
     def bridges_state(self) -> Tuple[bool, ...]:
+        """Return the open/closed state of each bridge cell."""
         return self._bridges_state
 
     def get_occupied_cells(self) -> Tuple[Tuple[int, int], ...]:
@@ -93,6 +99,7 @@ class State:
         )
 
     def __eq__(self, other: object) -> bool:
+        """Compare states by orientation, positions, control, and bridges."""
         if not isinstance(other, State):
             return False
         return (
@@ -104,10 +111,11 @@ class State:
         )
 
     def __hash__(self) -> int:
+        """Return the precomputed hash used by search visited sets."""
         return self._hash
 
     def __repr__(self) -> str:
+        """Return a readable representation of this state."""
         if self._orientation == Orientation.SPLIT:
             return f"State(SPLIT, b1={self._b1}, b2={self._b2}, active={self._active_block}, bridges={self._bridges_state})"
         return f"State({self._orientation.name}, pos=({self._b1}, {self._b2}), bridges={self._bridges_state})"
-

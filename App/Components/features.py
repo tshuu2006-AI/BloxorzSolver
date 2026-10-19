@@ -1,27 +1,34 @@
-from enum import Enum, auto
-from typing import Dict, List, Optional, Set, Tuple
+from enum import Enum
+from typing import List, Optional, Tuple
 
 
 class TileType(Enum):
-    VOID = auto()
-    FLOOR = auto()
-    FRAGILE = auto()
-    GOAL = auto()
-    BRIDGE = auto()
+    """Types of cells that can appear on the game board."""
+
+    VOID = 1
+    FLOOR = 2
+    FRAGILE = 3
+    GOAL = 4
+    BRIDGE = 5
 
 
 class SwitchType(Enum):
-    SOFT = auto()  # Dẫm kiểu nào cũng bật
-    HEAVY = auto()  # Chỉ bật khi STANDING
-    SPLIT = auto()  # Chỉ bật khi STANDING, dịch chuyển & tách khối
+    """Activation rule and behavior of a switch."""
+
+    SOFT = 1  # Dẫm kiểu nào cũng bật
+    HEAVY = 2  # Chỉ bật khi STANDING
+    SPLIT = 3  # Chỉ bật khi STANDING, dịch chuyển & tách khối
 
 
 class SwitchMode(Enum):
-    TOGGLE = auto()
-    PERMANENT = auto()
+    """How a switch changes the state of its linked bridges."""
+
+    TOGGLE = 1
+    PERMANENT = 2
 
 
 class Switch:
+    """A board switch and the bridge or split effects it triggers."""
 
     def __init__(
         self,
@@ -34,7 +41,8 @@ class Switch:
         effects: Optional[List[Tuple[Tuple[int, int], SwitchMode, bool]]] = None,
         split_active: int = 0,
     ):
-        """
+        """Create a switch at ``pos`` with its configured effects.
+
         :param effects: tùy chọn - hiệu ứng riêng cho từng cầu dưới dạng
             ``(ô cầu, mode, target_state)``. Dùng khi một công tắc vừa "toggle"
             cầu này vừa "mở"/"đóng" cầu kia. Nếu không đặt, mọi cầu trong
@@ -52,7 +60,7 @@ class Switch:
         self.split_active = split_active
 
     def bridge_effects(self) -> List[Tuple[Tuple[int, int], SwitchMode, bool]]:
-        """Danh sách ``(ô cầu, mode, target_state)`` mà công tắc này tác động."""
+        """Return bridge effects as ``(cell, mode, target_state)`` tuples."""
         if self.effects is not None:
             return self.effects
         return [(cell, self.mode, self.target_state) for cell in self.linked_bridges]

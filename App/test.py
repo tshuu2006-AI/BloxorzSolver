@@ -8,7 +8,6 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from App.Components.features import TileType, SwitchType, SwitchMode, Switch
 from App.Components.state import Orientation, State
-from App.Components.node import Node
 from App.Components.problem import Problem
 from App.Solvers.DFS_solver import DFSSolver
 from App.Solvers.UCS_solver import UCSSolver
@@ -177,19 +176,8 @@ def build_test_3_bridges_and_switches() -> Problem:
         (0, 5): 1,
     }
     switches = {
-        (0, 1): Switch(
-            pos=(0, 1),
-            switch_type=SwitchType.SOFT,
-            linked_bridges=[(0, 4)],
-            mode=SwitchMode.TOGGLE,
-        ),
-        (0, 3): Switch(
-            pos=(0, 3),
-            switch_type=SwitchType.HEAVY,
-            linked_bridges=[(0, 5)],
-            mode=SwitchMode.PERMANENT,
-            target_state=True,
-        ),
+        (0, 1): Switch(pos=(0, 1), switch_type=SwitchType.SOFT, linked_bridges=[(0, 4)]),
+        (0, 3): Switch(pos=(0, 3), switch_type=SwitchType.HEAVY, linked_bridges=[(0, 5)], mode=SwitchMode.PERMANENT),
     }
     # Ban đầu cả 2 cây cầu đều đóng (False, False)
     initial_state = State(
@@ -252,7 +240,6 @@ def build_test_4_split_and_merge() -> Problem:
             switch_type=SwitchType.SOFT,
             linked_bridges=[(2, 2)],
             mode=SwitchMode.PERMANENT,
-            target_state=True,
         ),
     }
     initial_state = State(
@@ -331,13 +318,8 @@ def build_test_5_hardcore_stage() -> Problem:
 
     switches = {
         # Heavy Switch ở Đảo 1: Phải đứng thẳng (STANDING) tại (2, 3) mới mở được Cầu 0 & 1
-        (2, 3): Switch(
-            pos=(2, 3),
-            switch_type=SwitchType.HEAVY,
-            linked_bridges=[(2, 5), (2, 6)],
-            mode=SwitchMode.PERMANENT,
-            target_state=True,
-        ),
+        (2, 3): Switch(pos=(2, 3), switch_type=SwitchType.HEAVY, linked_bridges=[(2, 5), (2, 6)],
+                       mode=SwitchMode.PERMANENT),
         # Split Switch ở Đảo 2: Đứng tại (1, 10) tách thành 2 khối đơn ở (6, 2) và (6, 8)
         (1, 10): Switch(
             pos=(1, 10),
@@ -346,21 +328,9 @@ def build_test_5_hardcore_stage() -> Problem:
             split_targets=((6, 2), (6, 8)),
         ),
         # Soft Switch bên nhánh trái (7, 3): Khối b1 dẫm lên để mở Cầu 3 (6, 7) cho khối b2
-        (7, 3): Switch(
-            pos=(7, 3),
-            switch_type=SwitchType.SOFT,
-            linked_bridges=[(6, 7)],
-            mode=SwitchMode.PERMANENT,
-            target_state=True,
-        ),
+        (7, 3): Switch(pos=(7, 3), switch_type=SwitchType.SOFT, linked_bridges=[(6, 7)], mode=SwitchMode.PERMANENT),
         # Soft Switch bên nhánh phải (7, 7): Khối b2 dẫm lên để mở Cầu 2 (6, 4) cho khối b1
-        (7, 7): Switch(
-            pos=(7, 7),
-            switch_type=SwitchType.SOFT,
-            linked_bridges=[(6, 4)],
-            mode=SwitchMode.PERMANENT,
-            target_state=True,
-        ),
+        (7, 7): Switch(pos=(7, 7), switch_type=SwitchType.SOFT, linked_bridges=[(6, 4)], mode=SwitchMode.PERMANENT),
     }
 
     initial_state = State(

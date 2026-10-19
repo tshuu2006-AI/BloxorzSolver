@@ -1,19 +1,31 @@
+"""
+Implementation of a solver with Depth-First Search Algorithm
+"""
 import time
 import tracemalloc
 from typing import Optional, List
-from App.Solvers.base_solver import BaseSolver
+
 from App.Components.node import Node
 from App.Components.problem import Problem
+from App.Solvers.base_solver import BaseSolver
+
 
 class DFSSolver(BaseSolver):
+    """Implementation of a solver with Depth-First Search Algorithm"""
+    def __init__(self):
+        super().__init__()
 
     def solve(self, problem: Problem) -> Optional[List[str]]:
+        """
+        :param problem: the problem that need to be solved
+        :return:
+        """
         self.problem = problem
         start_time = time.time()
         tracemalloc.start()
 
         self.expanded_nodes = 0
-        root_node = Node(state=problem.initial_state, path_cost=0)
+        root_node = Node(state=problem.initial_state)
         stack = [root_node]
         visited = {root_node.state}
 

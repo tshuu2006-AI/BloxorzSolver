@@ -1,16 +1,23 @@
+"""
+Implementations of abstract classes (BaseSolver, BestFirstSearchSolver)
+"""
+import heapq
+import itertools
 import time
 import tracemalloc
+from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Callable
 
 from App.Components.node import Node
 from App.Components.problem import Problem
 from App.Components.state import State
-from abc import ABC, abstractmethod
-import heapq
-import itertools
+
 
 class BaseSolver(ABC):
+    """Common interface and search metrics for Bloxorz solvers."""
+
     def __init__(self):
+        """Initialize metric fields populated during a search."""
         self.search_time: float = 0.0
         self.memory_usage: int = 0  # Lưu theo Bytes (hoặc đổi sang KB/MB)
         self.expanded_nodes: int = 0
@@ -20,10 +27,18 @@ class BaseSolver(ABC):
 
     @abstractmethod
     def solve(self, problem: Problem):
+        """Search ``problem`` for a solution.
+
+        Subclasses should return the sequence of actions, or ``None`` if no
+        solution exists.
+        """
         pass
 
     def get_metrics(self) -> dict:
-        """Trả về các chỉ số đánh giá để hiển thị lên GUI hoặc xuất báo cáo."""
+        """Return search statistics in a form suitable for display or export.
+
+        Memory is reported in KiB; elapsed time is reported in seconds.
+        """
         return {
             "search_time_sec": round(self.search_time, 6),
             "peak_memory_kb": round(self.memory_usage / 1024, 2),
@@ -33,40 +48,55 @@ class BaseSolver(ABC):
         }
 
 class PriorityQueue:
+    """A min-priority queue with stable ordering for equal priorities."""
+
     def __init__(self, key: Callable = lambda x: x):
+        """Create a queue whose item priorities are computed by ``key``."""
         self._heap = []
         self._key = key
         # Dùng bộ đếm tăng dần để tránh lỗi so sánh 2 Node khi điểm f(n) bằng nhau
         self._counter = itertools.count()
 
     def push(self, item):
+        """Add ``item`` to the queue according to its computed priority."""
         priority = self._key(item)
         count = next(self._counter)
         heapq.heappush(self._heap, (priority, count, item))
 
     def pop(self):
+        """Remove and return the item with the lowest priority."""
         return heapq.heappop(self._heap)[2]
 
     def __len__(self):
+        """Return the number of queued items."""
         return len(self._heap)
 
 class BestFirstSearchSolver(BaseSolver):
-    """Best First Search Algorithm"""
+    """Shared best-first search implementation for priority-based solvers."""
+
     def __init__(self):
+        """Initialize the common best-first solver state."""
         super().__init__()
 
     @abstractmethod
     def evaluate(self, node: Node) -> float:
+        """Return the priority assigned to ``node`` in the frontier."""
         pass
 
 
     def solve(self, problem: Problem) -> Optional[List[str]]:
+        """Find a least-cost solution using the subclass's node priority.
+
+        Tracks the cheapest known path to each state and skips stale frontier
+        entries. Returns the action sequence, or ``None`` if the goal is
+        unreachable.
+        """
         self.problem = problem
         start_time = time.time()
         tracemalloc.start()
 
         self.expanded_nodes = 0
-        root_node = Node(state=problem.initial_state, path_cost=0)
+        root_node = Node(state=problem.initial_state)
 
         frontier: PriorityQueue = PriorityQueue(key = self.evaluate)
         frontier.push(root_node)
@@ -106,6 +136,5 @@ class BestFirstSearchSolver(BaseSolver):
         tracemalloc.stop()
 
         return solution
-
 
 

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Callable, List, Optional, Sequence
+from typing import Callable, List, Sequence
 
 import pygame
 

@@ -1,8 +1,11 @@
 from typing import Dict, List, Optional, Tuple
-from App.Components.state import State, Orientation
+
 from App.Components.features import TileType, Switch, SwitchType, SwitchMode
+from App.Components.state import State, Orientation
+
 
 class Problem:
+    """Bloxorz board rules, transitions, and goal definition."""
 
     def __init__(
         self,
@@ -29,6 +32,7 @@ class Problem:
 
     @property
     def initial_state(self) -> State:
+        """Return the initial game state."""
         return self.initial
 
     def is_goal(self, s: State) -> bool:
@@ -36,25 +40,21 @@ class Problem:
         return s.is_goal(self.goal_pos)
 
     def action_cost(self, s: State, a: str, s_new: State) -> int:
-        # 1. Đổi khối điều khiển khi đang SPLIT tốn ít chi phí nhất
+        """Return the cost of taking action ``a`` from ``s`` to ``s_new``."""
+        # 1. Đổi khối điều khiển khi đang SPLIT ko tốn chi phí
         if a == "SWITCH":
-            return 1
+            return 4
 
-        cost = 2  # Chi phí lăn cơ bản trên mặt sàn thường
+        cost = 1  # Chi phí lăn cơ bản trên mặt sàn thường
 
-        # 2. Phạt chi phí nếu lăn đè lên ô mỏng (FRAGILE) vì độ rủi ro cao
-        for cell in s_new.get_occupied_cells():
-            if self.grid.get(cell) == TileType.FRAGILE:
-                cost += 3
-                break
 
-        # 3. Nếu dựng khối từ nằm lên đứng thẳng (STANDING), tốn thêm lực nâng trọng tâm
-        if s.orientation != Orientation.STANDING and s_new.orientation == Orientation.STANDING:
-            cost += 1
-
-        # 4. Khuyến khích (giảm chi phí) nếu nước đi kích hoạt công tắc làm mở/đổi trạng thái cầu
-        if s.bridges_state != s_new.bridges_state:
-            cost = max(1, cost - 1)
+        # # 3. Nếu dựng khối từ nằm lên đứng thẳng (STANDING), tốn thêm lực nâng trọng tâm
+        # if s.orientation != Orientation.STANDING and s_new.orientation == Orientation.STANDING:
+        #     cost = max(1, cost - 1)
+        #
+        # # 4. Khuyến khích (giảm chi phí) nếu nước đi kích hoạt công tắc làm mở/đổi trạng thái cầu
+        # if s.bridges_state != s_new.bridges_state:
+        #     cost = max(1, cost - 1)
 
         return cost
 
@@ -153,6 +153,7 @@ class Problem:
     # ---------------- Các hàm bổ trợ logic chuyển động ----------------
 
     def _compute_next_geometry(self, s: State, a: str):
+        """Compute the block orientation and occupied cells after a roll."""
         delta = {"U": (-1, 0), "D": (1, 0), "L": (0, -1), "R": (0, 1)}
         dr, dc = delta[a]
 

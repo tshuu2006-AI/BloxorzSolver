@@ -11,13 +11,13 @@ from typing import Dict, List, Optional, Sequence
 
 import pygame
 
-from App.Game.path import path_steps
-from App.Game.race_logic import RaceState
-from App.Game.session import DELTAS, Outcome
 from App.GUI import theme
 from App.GUI.pieces import pieces_of
 from App.GUI.render import BoardRenderer, Camera, smoothstep
 from App.GUI.widgets import draw_text, rrect
+from App.Game.path import path_steps
+from App.Game.race_logic import RaceState
+from App.Game.session import DELTAS, Outcome
 
 ROLL_DUR = 0.24
 LANE_COLORS = [theme.BLOCK, (178, 132, 250)]  # vàng, tím

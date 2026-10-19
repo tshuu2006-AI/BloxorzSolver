@@ -19,24 +19,8 @@ from typing import Deque, Dict, List, Optional
 
 import pygame
 
-from App.Components.features import SwitchType, TileType
+from App.Components.features import TileType
 from App.Components.level_loader import Level, load_levels
-from App.Components.state import Orientation, State
-from App.Game.compare import CompareJob
-from App.Game.experiment import compare_configs, write_csv
-from App.Game.links import link_segments
-from App.Game.path import path_steps
-from App.Game.progress import Progress
-from App.Game.settings import Settings
-from App.Game.tips import TIPS, tip_for
-from App.Game.session import DELTAS, GameSession, Outcome, Status, fired_switches
-from App.Game.solver_bridge import (
-    HEURISTICS,
-    SOLVER_ORDER,
-    SolveOutcome,
-    SolverJob,
-    available_solvers,
-)
 from App.GUI import theme
 from App.GUI.audio import Audio
 from App.GUI.compare_view import CompareView
@@ -53,6 +37,21 @@ from App.GUI.widgets import (
     vgradient,
     wrap_text,
 )
+from App.Game.compare import CompareJob
+from App.Game.experiment import compare_configs, write_csv
+from App.Game.links import link_segments
+from App.Game.path import path_steps
+from App.Game.progress import Progress
+from App.Game.session import DELTAS, GameSession, Outcome, Status, fired_switches
+from App.Game.settings import Settings
+from App.Game.solver_bridge import (
+    HEURISTICS,
+    SOLVER_ORDER,
+    SolveOutcome,
+    SolverJob,
+    available_solvers,
+)
+from App.Game.tips import TIPS, tip_for
 
 LEVELS_DIR = Path(__file__).resolve().parents[2] / "levels"
 CLASSIC_DIR = LEVELS_DIR / "classic"

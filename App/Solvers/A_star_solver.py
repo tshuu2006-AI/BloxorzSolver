@@ -6,7 +6,7 @@ Heuristics return estimates in cost units.  The project's roll cost is at least
 
 from collections import deque
 from typing import Callable, Dict, Tuple
-
+import math
 from App.Components.node import Node
 from App.Components.problem import Problem
 from App.Components.state import Orientation, State
@@ -22,10 +22,12 @@ def _distance_to_goal(state: State, goal: Coordinate) -> int:
                for r, c in state.get_occupied_cells())
 
 
-def heuristic_manhattan(state: State, problem: Problem) -> float:
-    """Idea 1: lower bound from Manhattan distance, divided by two cells/roll."""
-    distance = _distance_to_goal(state, problem.goal_pos)
-    return (distance + 1) // 2
+def heuristic_manhattan(state, problem) -> int:
+    cells = state.get_occupied_cells()
+    cr = sum(r for r, _ in cells) / len(cells)
+    cc = sum(c for _, c in cells) / len(cells)
+    gr, gc = problem.goal_pos
+    return math.ceil((abs(cr - gr) + abs(cc - gc)) / 1.5)
 
 
 def heuristic_orientation_aware(state: State, problem: Problem) -> float:

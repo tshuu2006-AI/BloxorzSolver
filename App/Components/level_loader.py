@@ -81,6 +81,7 @@ class Level:
     reference_moves: Optional[int] = None  # số nước tối thiểu đã biết (nếu có), dùng để kiểm thử
 
     def bridge_group_of(self, cell: Cell) -> int:
+        """Return the bridge group containing ``cell``, or ``-1``."""
         for i, cells in enumerate(self.bridge_groups):
             if cell in cells:
                 return i
@@ -88,6 +89,7 @@ class Level:
 
 
 def _cell(value, what: str) -> Cell:
+    """Parse a coordinate pair and raise ``LevelError`` if it is invalid."""
     try:
         r, c = value
         return int(r), int(c)
@@ -96,6 +98,7 @@ def _cell(value, what: str) -> Cell:
 
 
 def level_from_dict(data: dict, path: str = "") -> Level:
+    """Validate level data and construct its metadata and ``Problem``."""
     name = data.get("name", Path(path).stem or "Untitled")
     where = f"Màn '{name}'"
 
@@ -250,6 +253,7 @@ def level_from_dict(data: dict, path: str = "") -> Level:
 
 
 def load_level(path, section: str = "custom") -> Level:
+    """Load and parse one JSON level file."""
     path = Path(path)
     with path.open(encoding="utf-8") as fh:
         level = level_from_dict(json.load(fh), str(path))
