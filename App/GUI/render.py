@@ -565,6 +565,8 @@ class BoardRenderer:
         show_hints: bool = True,
         min_order: Optional[float] = None,
         max_order: Optional[float] = None,
+        force_include_cells: Optional[set] = None,
+        exclude_cells: Optional[set] = None,
     ) -> None:
         grid = self.problem.grid
         # Bóng đổ nhẹ phía dưới bàn: chỉ vẽ ở pass đầu (khi min_order is None)
@@ -582,8 +584,11 @@ class BoardRenderer:
         for cell in self.tile_order:
             if cell in self.falling_fragile_cells:
                 continue
+            if exclude_cells is not None and cell in exclude_cells:
+                continue
             ord_val = self.iso.order(*cell)
-            if max_order is not None and ord_val > max_order:
+            is_forced = force_include_cells is not None and cell in force_include_cells
+            if not is_forced and max_order is not None and ord_val > max_order:
                 continue
             if min_order is not None and ord_val <= min_order:
                 continue

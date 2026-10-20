@@ -107,12 +107,58 @@ class RollAnim(Anim):
 class FallAnim(Anim):
     kind = "fall"
 
-    def __init__(self, piece, fragile_tiles=(), tilt_roll=None, dpos=(0.0, 0.0), **kw):
-        super().__init__(0.60, **kw)
+    def __init__(
+        self,
+        piece,
+        fragile_tiles=(),
+        tilt_roll=None,
+        dpos=(0.0, 0.0),
+        is_half_fall: bool = False,
+        c_sup=None,
+        c_void=None,
+        **kw,
+    ):
+        dur = kw.pop("dur", 0.72 if is_half_fall else 0.60)
+        super().__init__(dur, **kw)
         self.piece = piece
         self.fragile_tiles = tuple(fragile_tiles)
         self.tilt_roll = tilt_roll
         self.dpos = dpos
+        self.is_half_fall = is_half_fall
+        self.c_sup = c_sup
+        self.c_void = c_void
+
+    def get_transform(self, p: float):
+        """Tính toán (roll_arg, dr_off, dc_off, dz) tại thời điểm p (0..1)."""
+        if self.is_half_fall and self.tilt_roll is not None:
+            tdir, max_theta, piv = self.tilt_roll
+            p_tip = 0.35
+            theta_mid = 0.95  # ~54 độ: bập bênh nhấc bổng nửa trên sàn
+            theta_max = max_theta  # 1.8 (~103 độ)
+            if p <= p_tip:
+                u = p / p_tip
+                theta = (u ** 1.8) * theta_mid
+                dz = 0.0
+                dr_off = 0.0
+                dc_off = 0.0
+            else:
+                w = (p - p_tip) / (1.0 - p_tip)
+                theta = theta_mid + (w * (2 - w)) * (theta_max - theta_mid)
+                shift = w ** 1.3
+                dr_off = shift * self.dpos[0]
+                dc_off = shift * self.dpos[1]
+                dz = -(w ** 2) * 6.5
+            roll_arg = (tdir, theta, piv)
+            return roll_arg, dr_off, dc_off, dz
+        else:
+            dz = -(p ** 2) * 6.0
+            roll_arg = None
+            if self.tilt_roll is not None:
+                tdir, max_theta, piv = self.tilt_roll
+                roll_arg = (tdir, smoothstep(p) * max_theta, piv)
+            dr_off = (p ** 1.5) * self.dpos[0]
+            dc_off = (p ** 1.5) * self.dpos[1]
+            return roll_arg, dr_off, dc_off, dz
 
 
 class SinkAnim(Anim):
@@ -576,6 +622,9 @@ class App:
 
             tilt_roll = None
             dpos = (0.0, 0.0)
+            is_half_fall = False
+            c_sup_cell = None
+            c_void_cell = None
             if not fragile_tiles:
                 pb = self.level.problem
                 st_prev = prev
@@ -589,24 +638,19 @@ class App:
                         if b_idx is not None and not st_prev.bridges_state[b_idx]:
                             return False
                     return True
-
                 if len(cells) == 2:
                     c0, c1 = cells[0], cells[1]
                     s0, s1 = is_sup(c0), is_sup(c1)
-                    if s0 and not s1:
-                        # c0 trên sàn, c1 rơi ra ngoài -> nghiêng lật về phía c1 quanh mép chung
-                        dr = c1[0] - c0[0]
-                        dc = c1[1] - c0[1]
-                        pivot = c1[0] if dr > 0 else (c0[0] if dr < 0 else (c1[1] if dc > 0 else c0[1]))
-                        tilt_roll = ((dr, dc), 1.25, pivot)
-                        dpos = (dr * 0.75, dc * 0.75)
-                    elif s1 and not s0:
-                        # c1 trên sàn, c0 rơi ra ngoài -> nghiêng lật về phía c0 quanh mép chung
-                        dr = c0[0] - c1[0]
-                        dc = c0[1] - c1[1]
-                        pivot = c0[0] if dr > 0 else (c1[0] if dr < 0 else (c0[1] if dc > 0 else c1[1]))
-                        tilt_roll = ((dr, dc), 1.25, pivot)
-                        dpos = (dr * 0.75, dc * 0.75)
+                    if s0 != s1:
+                        # 1 ô trên sàn, 1 ô rơi ra ngoài khoảng không -> bập bênh chuẩn xác từ mép giữa
+                        c_sup_cell = c0 if s0 else c1
+                        c_void_cell = c1 if s0 else c0
+                        dr = c_void_cell[0] - c_sup_cell[0]
+                        dc = c_void_cell[1] - c_sup_cell[1]
+                        pivot = max(c_sup_cell[0], c_void_cell[0]) if dr != 0 else max(c_sup_cell[1], c_void_cell[1])
+                        tilt_roll = ((dr, dc), 1.8, pivot)
+                        dpos = (dr * 0.85, dc * 0.85)
+                        is_half_fall = True
                     else:
                         # Cả 2 ô đều lăn ra ngoài sàn: trôi chéo theo quán tính hướng lăn
                         dr, dc = DELTAS.get(ev.action, (0, 0))
@@ -628,7 +672,19 @@ class App:
                     self.renderer.burst(cell, n=28, colors=fragile_colors, z=0.05)
                 self.audio.play("fall")
 
-            anims.append(FallAnim(piece, fragile_tiles, tilt_roll=tilt_roll, dpos=dpos, statics=statics, on_start=start_fall))
+            anims.append(
+                FallAnim(
+                    piece,
+                    fragile_tiles,
+                    tilt_roll=tilt_roll,
+                    dpos=dpos,
+                    is_half_fall=is_half_fall,
+                    c_sup=c_sup_cell,
+                    c_void=c_void_cell,
+                    statics=statics,
+                    on_start=start_fall,
+                )
+            )
         elif o == Outcome.WON:
             goal = self.level.problem.goal_pos
             new_best = not self.used_solver and self.progress.record_win(self.level.name, self.session.moves)
@@ -1113,17 +1169,11 @@ class App:
             elif anim.kind == "fall":
                 for cell in anim.fragile_tiles:
                     rd.draw_falling_fragile_tile(surf, cell, p)
-                dz = -(p ** 2) * 6.0
                 alpha = max(0.0, 1.0 - p ** 1.4)
-                roll_arg = None
-                if anim.tilt_roll is not None:
-                    tdir, max_theta, piv = anim.tilt_roll
-                    roll_arg = (tdir, smoothstep(p) * max_theta, piv)
-                dr_off = (p ** 1.5) * anim.dpos[0]
-                dc_off = (p ** 1.5) * anim.dpos[1]
+                roll_arg, dr_off, dc_off, dz = anim.get_transform(p)
                 self.draw_piece(
                     surf, anim.piece, roll=roll_arg, dz=dz, alpha=alpha,
-                    dr_offset=dr_off, dc_offset=dc_off,
+                    dr_offset=dr_off, dc_offset=dc_off, shadow=False,
                 )
             elif anim.kind == "sink":
                 pc = anim.piece
@@ -1684,16 +1734,19 @@ class App:
         falling_anim = self.anims[0] if (self.anims and self.anims[0].kind == "fall") else None
         if falling_anim:
             p = min(1.0, falling_anim.t / falling_anim.dur)
-            dr_off = (p ** 1.5) * falling_anim.dpos[0]
-            dc_off = (p ** 1.5) * falling_anim.dpos[1]
+            roll_arg, dr_off, dc_off, dz = falling_anim.get_transform(p)
             fall_cells = falling_anim.piece["cells"]
             mid_r = sum(c[0] for c in fall_cells) / len(fall_cells) + dr_off
             mid_c = sum(c[1] for c in fall_cells) / len(fall_cells) + dc_off
             cut_order = self.renderer.iso.order(mid_r, mid_c)
 
-            self.renderer.draw_board(surf, max_order=cut_order)
+            # Với half-fall, c_sup là ô sàn đỡ khối: luôn vẽ ở Pass 1 dưới khối, không để Pass 2 vẽ đè lên nửa trên sàn
+            force_p1 = {falling_anim.c_sup} if (falling_anim.is_half_fall and falling_anim.c_sup) else None
+            exclude_p2 = {falling_anim.c_sup} if (falling_anim.is_half_fall and falling_anim.c_sup) else None
+
+            self.renderer.draw_board(surf, max_order=cut_order, force_include_cells=force_p1)
             self._draw_pieces(surf, static_filter=lambda s: self.renderer.iso.order(*s["cells"][0]) <= cut_order)
-            self.renderer.draw_board(surf, min_order=cut_order, show_hints=False)
+            self.renderer.draw_board(surf, min_order=cut_order, show_hints=False, exclude_cells=exclude_p2)
             for s in falling_anim.statics:
                 if self.renderer.iso.order(*s["cells"][0]) > cut_order:
                     self.draw_piece(surf, s)
