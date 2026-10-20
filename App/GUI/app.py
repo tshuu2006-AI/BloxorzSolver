@@ -27,7 +27,7 @@ from App.GUI.compare_view import CompareView
 from App.GUI.models import INITIAL_FRAME, frame_for_orientation, roll_frame
 from App.GUI.pieces import pieces_of
 from App.GUI.race import LANE_COLORS, Race
-from App.GUI.render import BoardRenderer, Camera, smoothstep
+from App.GUI.render import BoardRenderer, Camera, piece_box, smoothstep
 from App.GUI.widgets import (
     Button,
     Segmented,
@@ -1738,11 +1738,24 @@ class App:
             fall_cells = falling_anim.piece["cells"]
             mid_r = sum(c[0] for c in fall_cells) / len(fall_cells) + dr_off
             mid_c = sum(c[1] for c in fall_cells) / len(fall_cells) + dc_off
-            cut_order = self.renderer.iso.order(mid_r, mid_c)
+            center_order = self.renderer.iso.order(mid_r, mid_c)
+            tan_elev = self.renderer.iso.view[2]
+            height = falling_anim.piece["height"]
 
-            # Với half-fall, c_sup là ô sàn đỡ khối: luôn vẽ ở Pass 1 dưới khối, không để Pass 2 vẽ đè lên nửa trên sàn
-            force_p1 = {falling_anim.c_sup} if (falling_anim.is_half_fall and falling_anim.c_sup) else None
-            exclude_p2 = {falling_anim.c_sup} if (falling_anim.is_half_fall and falling_anim.c_sup) else None
+            if falling_anim.is_half_fall and p <= 0.35:
+                # Trong pha bập bênh ở mép sàn: khối tựa trên c_sup và nhấc bổng trên sàn
+                # Giữ c_sup và các ô sàn lân cận ở Pass 1 để không cắt xén khối
+                sup_order = self.renderer.iso.order(*falling_anim.c_sup)
+                cut_order = sup_order + 0.5
+                force_p1 = {falling_anim.c_sup}
+                exclude_p2 = {falling_anim.c_sup}
+            else:
+                # Pha rơi chìm (hoặc rơi tự do / ô vỡ): cut_order hạ sâu theo dz
+                # Khi khối rơi phía sau sàn, các ô mép sàn/vách hố phía trước có thứ tự lớn hơn
+                # sẽ được vẽ ở Pass 2 đè lên khối, che khuất khối rơi tự nhiên
+                cut_order = center_order + (dz + 0.2 * height) * tan_elev
+                force_p1 = None
+                exclude_p2 = None
 
             self.renderer.draw_board(surf, max_order=cut_order, force_include_cells=force_p1)
             self._draw_pieces(surf, static_filter=lambda s: self.renderer.iso.order(*s["cells"][0]) <= cut_order)
