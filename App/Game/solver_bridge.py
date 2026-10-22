@@ -28,7 +28,6 @@ SOLVER_SPECS = {
     "A*": ("App.Solvers.A_star_solver", "AstarSolver"),
 }
 SOLVER_ORDER = ["BFS", "DFS", "UCS", "A*"]
-HEURISTICS = ["manhattan", "orientation", "relaxed"]
 
 
 def _find_class(name: str):
@@ -40,6 +39,21 @@ def _find_class(name: str):
     except Exception:  # file solver đang viết dở: coi như chưa có
         return None
     return getattr(module, class_name, None)
+
+
+def available_heuristics() -> List[str]:
+    """Return heuristic names registered by the currently installed A* solver."""
+    module_name, _ = SOLVER_SPECS["A*"]
+    try:
+        module = importlib.import_module(module_name)
+    except Exception:
+        return []
+    registry = getattr(module, "HEURISTICS", {})
+    return list(registry.keys())
+
+
+# Keep the benchmark configuration list in sync with A*'s actual registry.
+HEURISTICS = available_heuristics()
 
 
 def available_solvers() -> Dict[str, bool]:

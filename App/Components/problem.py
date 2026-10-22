@@ -49,7 +49,7 @@ class Problem:
         # 2. Phạt chi phí nếu lăn đè lên ô mỏng (FRAGILE) vì độ rủi ro cao
         for cell in s_new.get_occupied_cells():
             if self.grid.get(cell) == TileType.FRAGILE:
-                cost += 3
+                cost += 1
                 break
 
         # 3. Nếu dựng khối từ nằm lên đứng thẳng (STANDING), tốn thêm lực nâng trọng tâm

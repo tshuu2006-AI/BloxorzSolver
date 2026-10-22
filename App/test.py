@@ -11,7 +11,7 @@ from App.Components.state import Orientation, State
 from App.Components.problem import Problem
 from App.Solvers.DFS_solver import DFSSolver
 from App.Solvers.UCS_solver import UCSSolver
-from App.Solvers.A_star_solver import AstarSolver
+from App.Solvers.A_star_solver import AstarSolver, HEURISTICS
 
 
 
@@ -355,7 +355,7 @@ def parse_args():
         help="Search algorithm to use: dfs, ucs, or astar (default: dfs).",
     )
     parser.add_argument(
-        "--heuristic", choices=("manhattan", "orientation", "relaxed"),
+        "--heuristic", choices=tuple(HEURISTICS),
         default="relaxed",
         help="A* heuristic (only used with --solver astar; default: relaxed).",
     )

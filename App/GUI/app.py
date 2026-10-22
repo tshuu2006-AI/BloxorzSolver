@@ -30,7 +30,6 @@ from App.GUI.race import LANE_COLORS, Race
 from App.GUI.render import BoardRenderer, Camera, piece_box, smoothstep
 from App.GUI.widgets import (
     Button,
-    Segmented,
     Slider,
     Toggle,
     draw_text,
@@ -46,10 +45,10 @@ from App.Game.progress import Progress
 from App.Game.session import DELTAS, GameSession, Outcome, Status, fired_switches
 from App.Game.settings import Settings
 from App.Game.solver_bridge import (
-    HEURISTICS,
     SOLVER_ORDER,
     SolveOutcome,
     SolverJob,
+    available_heuristics,
     available_solvers,
 )
 from App.Game.tips import TIPS, tip_for
@@ -238,9 +237,14 @@ class App:
         self.cam = Camera()
         self.cam_dirty = False
         self.cam_drag = None  # "rotate" | "pan" khi đang kéo chuột
+        self.heuristic_options = available_heuristics()
+        default_heuristic = self.heuristic_options[0] if self.heuristic_options else "manhattan"
         self.heuristic = (
-            self.settings.astar_heuristic if self.settings.astar_heuristic in HEURISTICS else "relaxed"
+            self.settings.astar_heuristic
+            if self.settings.astar_heuristic in self.heuristic_options
+            else default_heuristic
         )
+        self.heuristic_popup_open = False
         self.speed = self.settings.replay_speed
         self.job: Optional[SolverJob] = None
         self.stats: Optional[SolveOutcome] = None
@@ -287,12 +291,12 @@ class App:
         for i, name in enumerate(SOLVER_ORDER):
             rect = (x0 + (i % 2) * (sw + 12), 452 + (i // 2) * 76, sw, 64)
             self.solver_buttons[name] = Button(
-                rect, name, lambda n=name: self.start_solver(n), "secondary",
+                rect,
+                name,
+                lambda n=name: self.open_heuristic_popup() if n == "A*" else self.start_solver(n),
+                "secondary",
                 accent=SOLVER_COLORS[name], sublabel=SOLVER_SUB[name],
             )
-        self.heur_seg = Segmented(
-            (x0, 640, w, 40), HEURISTICS, HEURISTICS.index(self.heuristic), self._set_heuristic
-        )
         ry = 704
         self.btn_fwd = Button((right - 60, ry, 60, 52), "", lambda: self._request_step(1), tooltip="Step forward  (.)", icon="fwd")
         self.btn_pause = Button((right - 60 - 8 - 100, ry, 100, 52), "Pause", self.toggle_pause)
@@ -382,6 +386,48 @@ class App:
     def _set_heuristic(self, name: str):
         self.heuristic = name
         self.settings.set("astar_heuristic", name)
+
+    def open_heuristic_popup(self):
+        self.heuristic_options = available_heuristics()
+        if not self.heuristic_options:
+            self.toast("No A* heuristics are available", theme.BAD, 2.5)
+            return
+        if self.heuristic not in self.heuristic_options:
+            self._set_heuristic(self.heuristic_options[0])
+        self.heuristic_popup_open = True
+
+    def _heuristic_popup_rects(self):
+        if not self.heuristic_options:
+            return []
+        button_rect = self.solver_buttons["A*"].rect
+        row_h = 42
+        width = min(240, self.pw)
+        x = min(max(button_rect.x, self.x0), self.x0 + self.pw - width)
+        y = button_rect.bottom + 8
+        return [
+            (name, pygame.Rect(x, y + i * row_h, width, row_h))
+            for i, name in enumerate(self.heuristic_options)
+        ]
+
+    def _draw_heuristic_popup(self, surf, mouse):
+        items = self._heuristic_popup_rects()
+        if not items:
+            return
+        panel = pygame.Rect(items[0][1].x, items[0][1].y, items[0][1].w, sum(r.h for _, r in items))
+        rrect(surf, panel, theme.CARD, 12, theme.PANEL_EDGE, 2)
+        for name, rect in items:
+            hot = rect.collidepoint(mouse)
+            selected = name == self.heuristic
+            if hot or selected:
+                inner = rect.inflate(-6, -4)
+                rrect(surf, inner, theme.ACCENT_DARK if selected else theme.CARD_HI, 8)
+            label = name.replace("_", " ").title()
+            draw_text(
+                surf, label, theme.font(17, True),
+                (28, 22, 8) if selected else theme.TEXT, (rect.x + 14, rect.centery), "midleft",
+            )
+            if selected:
+                draw_text(surf, "✓", theme.font(18, True), theme.GOOD, (rect.right - 14, rect.centery), "midright")
 
     def _reset_camera(self):
         self.cam.reset()
@@ -953,6 +999,14 @@ class App:
                 if not self._picker_panel().collidepoint(mouse):
                     self.picker_open = False
             return
+        if self.heuristic_popup_open and event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            for name, rect in self._heuristic_popup_rects():
+                if rect.collidepoint(mouse):
+                    self._set_heuristic(name)
+                    self.heuristic_popup_open = False
+                    self.start_solver("A*")
+                    return
+            self.heuristic_popup_open = False
         for btn in self._banner_buttons():
             if btn.handle(event, mouse):
                 return
@@ -960,6 +1014,7 @@ class App:
             for key, rect in self.tab_rects.items():
                 if rect.collidepoint(mouse):
                     self.panel_tab = key
+                    self.heuristic_popup_open = False
                     return
         for btn in self._main_buttons():
             if btn.handle(event, mouse):
@@ -970,7 +1025,6 @@ class App:
                 if not self.slider.drag:  # lưu khi thả chuột, không lưu từng điểm khi kéo
                     self.settings.set("replay_speed", self.speed)
                 return
-            self.heur_seg.handle(event, mouse)
         else:
             for tg in self.toggles:
                 if tg.handle(event, mouse):
@@ -998,6 +1052,8 @@ class App:
                 self.exit_race()
             elif self.compare_open:
                 self.close_compare()
+            elif self.heuristic_popup_open:
+                self.heuristic_popup_open = False
             self.picker_open = False
         elif self.race is not None:
             self._race_key(k)
@@ -1031,6 +1087,7 @@ class App:
             self._reset_camera()
         elif k == pygame.K_TAB:
             self.panel_tab = "settings" if self.panel_tab == "play" else "play"
+            self.heuristic_popup_open = False
 
     # ------------------------------------------------------------------ camera
     def _in_board(self, mouse) -> bool:
@@ -1334,6 +1391,8 @@ class App:
             self._draw_settings_tab(surf, mouse)
         else:
             self._draw_play_tab(surf, mouse)
+            if self.heuristic_popup_open:
+                self._draw_heuristic_popup(surf, mouse)
         hint = "Arrows / WASD roll   Space swap cube   Z undo   R restart   N stages   Tab settings   F12 screenshot"
         for i, line in enumerate(wrap_text(hint, theme.font(15), w)):
             draw_text(surf, line, theme.font(15), theme.TEXT_FAINT, (x0 + 2, 1004 + i * 19))
@@ -1372,8 +1431,6 @@ class App:
         for b in self.solver_buttons.values():
             b.draw(surf)
 
-        draw_text(surf, "A* HEURISTIC", theme.font(14, True), theme.TEXT_FAINT, (x0 + 2, 614))
-        self.heur_seg.draw(surf)
         self.slider.draw(surf)
         self.btn_back.draw(surf)
         self.btn_pause.draw(surf)
