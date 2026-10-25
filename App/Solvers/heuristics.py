@@ -46,21 +46,6 @@ class ManhattanHeuristic(BaseHeuristic):
         return "Manhattan"
 
 
-class OrientationManhattanHeuristic(ManhattanHeuristic):
-    """Manhattan lower bound strengthened by the required final orientation."""
-
-    def __call__(self, state: State, problem: Problem) -> float:
-        h = super().__call__(state, problem)
-        if state.orientation in (Orientation.HORIZONTAL, Orientation.VERTICAL):
-            return max(h, 1)  # At least one roll is required to become standing.
-        if state.orientation == Orientation.SPLIT:
-            return max(h, 2)  # Merge to a lying block, then stand on the goal.
-        return h
-
-    def __str__(self):
-        return "Orientation Manhattan"
-
-
 class RelaxedConfigurationHeuristic(BaseHeuristic):
     """Shortest lower-bound cost in a relaxed orientation-aware puzzle graph.
 
@@ -68,8 +53,8 @@ class RelaxedConfigurationHeuristic(BaseHeuristic):
     merging, and split-switch teleports. It preserves void and fragile-tile
     support rules, treats every bridge as open, and ignores bridge-state switch
     effects. Those relaxations can add routes but cannot remove a real route.
-    Abstract rolls cost 1 when they do not land on fragile cells and 4 when
-    they do; the latter is the real minimum 2 + 3 - 1 bridge discount. A
+    Abstract rolls cost 1 on ordinary cells and 2 on fragile cells, matching
+    the minimum real fragile-roll cost after a bridge discount. A
     control switch costs 1. These are lower bounds on the current real action
     costs, so Dijkstra's distance is admissible.
 
@@ -155,7 +140,7 @@ class RelaxedConfigurationHeuristic(BaseHeuristic):
         if action == "SWITCH":
             return 1
         if any(problem.grid.get(cell) == TileType.FRAGILE for cell in state.get_occupied_cells()):
-            return 4
+            return 2
         return 1
 
     @staticmethod
@@ -230,9 +215,85 @@ class RelaxedConfigurationHeuristic(BaseHeuristic):
         return "Relaxed Configuration Distance"
 
 
-class ModifiedManhattanHeuristic(OrientationManhattanHeuristic):
-    """Backward-compatible name for the orientation-aware Manhattan variant."""
+class ModifiedManhattanHeuristic(ManhattanHeuristic):
+    """Choose the cheapest direct or chained split-switch route estimate.
 
+    Route legs use the minimum action cost of 1. Each leg accounts for the
+    current orientation when estimating the cost to stand on a switch. The
+    search recursively considers chains of distinct split switches and prunes
+    branches that cannot beat the best route found so far.
+    """
 
-class RelaxedPointHeuristic(RelaxedConfigurationHeuristic):
-    """Backward-compatible descriptive name for the stronger relaxed search."""
+    @staticmethod
+    def _center(state: State) -> Tuple[float, float]:
+        cells = state.get_occupied_cells()
+        return (
+            sum(r for r, _ in cells) / len(cells),
+            sum(c for _, c in cells) / len(cells),
+        )
+
+    @classmethod
+    def _to_standing(cls, state: State, destination: Coordinate) -> int:
+        row, col = cls._center(state)
+        distance = abs(row - destination[0]) + abs(col - destination[1])
+        movement = int((distance + 1.5 - 1e-9) // 1.5)
+        orientation_floor = {
+            Orientation.STANDING: 0,
+            Orientation.HORIZONTAL: 1,
+            Orientation.VERTICAL: 1,
+            Orientation.SPLIT: 2,
+        }[state.orientation]
+        if state.orientation == Orientation.SPLIT:
+            # One cube moves by at most one cell per roll. Reducing the
+            # Manhattan separation to adjacency takes at least D - 1 rolls;
+            # the last of those merges the cubes, then one more roll stands.
+            # Together this gives a lower bound of D moves (at least 2).
+            r1, c1 = state._b1
+            r2, c2 = state._b2
+            separation = abs(r1 - r2) + abs(c1 - c2)
+            orientation_floor = max(2, separation)
+        return max(movement, orientation_floor)
+
+    def __call__(self, state: State, problem: Problem) -> float:
+        split_switches = [
+            switch
+            for switch in problem.switches.values()
+            if switch.switch_type == SwitchType.SPLIT
+            and switch.split_targets is not None
+        ]
+        best = [self._to_standing(state, problem.goal_pos)]
+
+        def search(current: State, used: frozenset[int], cost_so_far: int) -> None:
+            # Finishing directly from this position is always a candidate.
+            best[0] = min(
+                best[0],
+                cost_so_far + self._to_standing(current, problem.goal_pos),
+            )
+
+            for index, switch in enumerate(split_switches):
+                if index in used:
+                    continue
+
+                # This leg includes the roll that activates the switch.
+                next_cost = cost_so_far + self._to_standing(current, switch.pos)
+
+                # Every teleport leaves a split block, which needs at least
+                # two more actions to merge and stand on the goal. Since all
+                # costs are nonnegative, this branch cannot improve best.
+                if next_cost + 2 >= best[0]:
+                    continue
+
+                target_a, target_b = switch.split_targets
+                after_teleport = State(
+                    Orientation.SPLIT,
+                    target_a,
+                    target_b,
+                    active_block=getattr(switch, "split_active", 0),
+                )
+                search(after_teleport, used | {index}, next_cost)
+
+        search(state, frozenset(), 0)
+        return best[0]
+
+    def __str__(self):
+        return "Modified Manhattan"

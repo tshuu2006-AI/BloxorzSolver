@@ -1,3 +1,5 @@
+"""Search-tree nodes and solution-path reconstruction."""
+
 from typing import List
 
 from App.Components.state import State

@@ -1,4 +1,6 @@
 
+"""Immutable, hashable representation of a Bloxorz game state."""
+
 from enum import IntEnum
 from typing import Optional, Tuple
 

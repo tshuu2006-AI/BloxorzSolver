@@ -1,3 +1,5 @@
+"""Command-line runner for the sample Bloxorz solvers and comparisons."""
+
 import argparse
 import sys
 import time
@@ -117,7 +119,7 @@ def parse_args():
     )
     parser.add_argument(
         "--heuristic",
-        choices=("manhattan", "orientation", "relaxed"),
+        choices=("manhattan", "modified_manhattan", "relaxed"),
         default="relaxed",
         help="Heuristic cho A* (chỉ dùng khi --solver astar; mặc định: relaxed)",
     )
