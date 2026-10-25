@@ -1,3 +1,5 @@
+"""Breadth-first search solver for Bloxorz state spaces."""
+
 import time
 import tracemalloc
 from collections import deque

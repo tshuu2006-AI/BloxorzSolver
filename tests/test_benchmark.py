@@ -47,7 +47,7 @@ class Rows(unittest.TestCase):
     def test_a_star_variants_find_the_same_cost_as_ucs(self):
         no, lv = level_named("Staircase")
         ucs = benchmark.run_config(lv, no, benchmark.Config("UCS", "UCS"))
-        for h in ("manhattan", "orientation", "relaxed"):
+        for h in ("manhattan", "modified_manhattan", "relaxed"):
             a = benchmark.run_config(lv, no, benchmark.Config(f"A* {h}", "A*", heuristic=h))
             self.assertEqual(a["cost"], ucs["cost"], h)
 

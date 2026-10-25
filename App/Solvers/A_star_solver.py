@@ -8,7 +8,7 @@ from typing import Dict, Tuple, Type
 from App.Solvers.heuristics import (
     BaseHeuristic,
     ManhattanHeuristic,
-    OrientationManhattanHeuristic,
+    ModifiedManhattanHeuristic,
     RelaxedConfigurationHeuristic,
 )
 from App.Components.node import Node
@@ -16,7 +16,7 @@ from App.Solvers.base_solver import BestFirstSearchSolver
 
 HEURISTICS: Dict[str, Type[BaseHeuristic]] = {
     "manhattan": ManhattanHeuristic,
-    "orientation": OrientationManhattanHeuristic,
+    "modified_manhattan": ModifiedManhattanHeuristic,
     "relaxed": RelaxedConfigurationHeuristic,
 }
 
@@ -29,7 +29,7 @@ class AstarSolver(BestFirstSearchSolver):
         self._heuristic_name = "relaxed"
         self._heuristic: BaseHeuristic = HEURISTICS[self._heuristic_name]()
 
-    def evaluate(self, node: Node):
+    def evaluate(self, node: Node)  :
         # Among equal f-scores, prefer the deeper node. This preserves A*'s
         # ordering by f while usually reducing plateau expansions.
         return (

@@ -1,3 +1,5 @@
+"""Bloxorz board rules, transitions, goal checks, and action costs."""
+
 from typing import Dict, List, Optional, Tuple
 
 from App.Components.features import TileType, Switch, SwitchType, SwitchMode
