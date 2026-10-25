@@ -120,11 +120,13 @@ class Button:
                 surf, self.accent, (r.x + 10, r.bottom - 6, r.w - 20, 3), border_radius=2
             )
         if self.sublabel:
-            draw_text(surf, self.label, theme.font(26, True), text, (r.centerx, r.centery - 9), "center")
+            main_sz = self.font_size if self.font_size != 24 else 21
+            sub_sz = max(11, int(main_sz * 0.62))
+            draw_text(surf, self.label, theme.font(main_sz, True), text, (r.centerx, r.centery - 10), "center")
             draw_text(
-                surf, self.sublabel, theme.font(15),
+                surf, self.sublabel, theme.font(sub_sz),
                 theme.TEXT_DIM if self.enabled else theme.TEXT_FAINT,
-                (r.centerx, r.centery + 17), "center",
+                (r.centerx, r.centery + 12), "center",
             )
         elif self.icon:
             cx, cy = r.center

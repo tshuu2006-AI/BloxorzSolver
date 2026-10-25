@@ -23,6 +23,7 @@ DEFAULTS: Dict[str, Any] = {
     "volume": 0.6,
     "tips_seen": [],
     "arctic_theme": False,      # Theme Bắc Cực: Khối băng chứa chim cánh cụt, sàn tuyết, cầu gỗ
+    "theme": "arctic",          # Theme hiện tại: "arctic" (Bắc Cực) hoặc "desert" (Sa Mạc)
 }
 
 _NUMERIC_RANGE = {"replay_speed": (0.5, 4.0), "tilt_deg": (0.0, 45.0), "volume": (0.0, 1.0)}

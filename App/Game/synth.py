@@ -84,6 +84,12 @@ def _fall(rate):  # tiếng huýt rơi
     return _sweep(0.6, 900, 110, rate, decay=3.0, wave="soft")
 
 
+def _sink(rate):  # Tiếng lọt thỏm xuống hố đích: tiếng hút xoáy rơi sâu kết hợp thump
+    s1 = _sweep(0.32, 440, 90, rate, decay=3.6, wave="soft", noise=0.08)
+    s2 = _sweep(0.24, 130, 48, rate, decay=5.5, wave="soft", noise=0.12)
+    return _seq([(0.0, s1), (0.10, s2)], rate)
+
+
 def _win(rate):  # hợp âm rải C-E-G-C
     notes = (523.25, 659.25, 783.99, 1046.5)
     parts = [(0.09 * k, _sweep(0.45 if k == 3 else 0.3, f, f, rate, decay=3.5, wave="soft")) for k, f in enumerate(notes)]
@@ -97,7 +103,7 @@ def _best(rate):  # kỷ lục mới
 SOUNDS: Dict[str, Callable[[int], List[float]]] = {
     "roll": _roll, "blocked": _blocked, "swap": _swap, "switch": _switch,
     "bridge_open": _bridge_open, "bridge_close": _bridge_close, "split": _split,
-    "merge": _merge, "fall": _fall, "win": _win, "best": _best,
+    "merge": _merge, "fall": _fall, "sink": _sink, "win": _win, "best": _best,
 }
 
 

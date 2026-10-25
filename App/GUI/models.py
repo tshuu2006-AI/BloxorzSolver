@@ -18,8 +18,11 @@ from typing import Dict, List, Optional, Tuple
 ROOT_DIR = Path(__file__).resolve().parents[2]
 
 PENGUIN_SEARCH_PATHS = [
+    Path(__file__).resolve().parent / "Penguin.obj",
+    Path("App/GUI/Penguin.obj"),
     Path("Penguin.obj"),
     Path("assets/Penguin.obj"),
+    ROOT_DIR / "App" / "GUI" / "Penguin.obj",
     ROOT_DIR / "Penguin.obj",
     ROOT_DIR / "assets" / "Penguin.obj",
     ROOT_DIR / "App" / "GUI" / "assets" / "Penguin.obj",
@@ -44,16 +47,17 @@ def roll_frame(frame: Frame3D, action: str) -> Frame3D:
     - Lăn L (-C): quay 90 độ quanh trục -R: (r, c, z) -> (r, -z, c)
     """
     head, front, right = frame
+    act = action.strip().upper()[:1] if action else ""
 
     def _rot(v: Vector3) -> Vector3:
         r, c, z = v
-        if action == "D":
+        if act == "D":
             return (z, c, -r)
-        elif action == "U":
+        elif act == "U":
             return (-z, c, r)
-        elif action == "R":
+        elif act == "R":
             return (r, z, -c)
-        elif action == "L":
+        elif act == "L":
             return (r, -z, c)
         return v
 
@@ -124,11 +128,11 @@ def _classify_face_color(
     pts: List[Tuple[float, float, float]],
     bounds: Tuple[float, float, float, float, float, float],
 ) -> Tuple[int, int, int]:
-    """Tô màu mặt chim cánh cụt dựa trên hình học:
-
-    - Chân & Mỏ: Cam rực rỡ
-    - Bụng trước: Trắng tuyết
-    - Thân & Lưng & Đầu: Xanh đen sẫm (Dark Navy)
+    """To mau mat chim canh cut:
+    - Chan & Mo: Cam ruc ro
+    - Bung truoc: Trang tuyet
+    - Ma: Trang nga
+    - Than & Lung & Dau: Xanh den sam (Dark Navy)
     """
     min_r, max_r, min_c, max_c, min_z, max_z = bounds
     cz = sum(p[2] for p in pts) / len(pts)
@@ -136,31 +140,26 @@ def _classify_face_color(
     cc = sum(p[1] for p in pts) / len(pts)
 
     h_span = max(1e-5, max_z - min_z)
-    r_span = max(1e-5, max_r - min_r)
-    c_span = max(1e-5, max_c - min_c)
-
     norm_z = (cz - min_z) / h_span
-    norm_r = cr / (r_span * 0.5) if r_span else 0.0
-    norm_c = cc / (c_span * 0.5) if c_span else 0.0
 
-    # Chân cam ở đáy
-    if norm_z < 0.12:
+    # Ban chan cam o day
+    if norm_z < 0.08:
         return (245, 130, 25)
 
-    # Mỏ cam ở trên cao phía trước
-    if 0.70 <= norm_z <= 0.88 and norm_r > 0.35 and abs(norm_c) < 0.30:
+    # Mo cam nhon o dinh truoc
+    if 0.80 <= norm_z <= 0.94 and cr > 0.28 and abs(cc) < 0.09:
         return (255, 145, 15)
 
-    # Bụng trắng tuyết ở mặt trước
-    if 0.12 <= norm_z <= 0.75 and norm_r > 0.05 and abs(norm_c) < 0.55:
-        return (246, 248, 252)
+    # Bung trang tuyet o mat truoc
+    if 0.08 <= norm_z <= 0.78 and cr > 0.01 and abs(cc) < 0.22:
+        return (248, 250, 255)
 
-    # Má trắng
-    if 0.75 < norm_z <= 0.88 and norm_r > 0.20 and 0.25 <= abs(norm_c) <= 0.60:
-        return (235, 240, 245)
+    # Ma trang
+    if 0.78 < norm_z <= 0.91 and cr > 0.04 and 0.05 <= abs(cc) <= 0.18:
+        return (235, 242, 250)
 
-    # Thân và lưng đen xanh
-    return (28, 36, 52)
+    # Than va lung den xanh
+    return (22, 30, 46)
 
 
 def normalize_obj_to_box(
@@ -197,8 +196,8 @@ def normalize_obj_to_box(
     c_span = max(1e-5, c_max - c_min)
 
     # Chiều dài thân chuẩn 1.70 (trong khối 2.0), ngang 0.70 (trong khối 1.0)
-    avail_h = 0.85 if is_cube else 1.70
-    avail_w = 0.40 if is_cube else 0.70
+    avail_h = 0.85 if is_cube else 1.65
+    avail_w = 0.45 if is_cube else 0.82
 
     scale_h = avail_h / h_span
     scale_w = avail_w / max(r_span, c_span)
@@ -300,7 +299,7 @@ def build_fallback_penguin(
                 colors.append((26, 34, 50))  # lưng đen xanh
 
     head_top = ring_start_indices[-1]
-    faces.append([head_top + i for i in reversed(range(n))])
+    faces.append([head_top + i for i in range(n)])
     colors.append((26, 34, 50))
 
     # 3. Mỏ cam
@@ -330,22 +329,219 @@ _CACHE: Dict[Tuple[str, bool], Tuple[List, List, List]] = {}
 def get_penguin_mesh(
     is_cube: bool = False,
 ) -> Tuple[List[Tuple[float, float, float]], List[List[int]], List[Tuple[int, int, int]]]:
-    """Trả về mô hình 3D chim cánh cụt căn giữa tại (0,0,0) (tự động nạp file .obj nếu có)."""
-    obj_file = _find_penguin_file()
-    cache_key = (str(obj_file) if obj_file else "builtin", is_cube)
+    """Trả về mô hình 3D low-poly chim cánh cụt siêu nhẹ, mượt mà 0% giật lag."""
+    cache_key = ("lowpoly_penguin", is_cube)
     if cache_key in _CACHE:
         return _CACHE[cache_key]
-
-    if obj_file is not None:
-        try:
-            raw_v, raw_f = parse_obj(obj_file)
-            if raw_v and raw_f:
-                mesh = normalize_obj_to_box(raw_v, raw_f, is_cube)
-                _CACHE[cache_key] = mesh
-                return mesh
-        except Exception as exc:
-            print(f"[PenguinLoader] Lỗi nạp {obj_file}: {exc}")
-
     mesh = build_fallback_penguin(is_cube)
+    _CACHE[cache_key] = mesh
+    return mesh
+
+
+def build_cactus_mesh(
+    is_cube: bool = False,
+) -> Tuple[List[Tuple[float, float, float]], List[List[int]], List[Tuple[int, int, int]]]:
+    """Mô hình 3D cây xương rồng low-poly cho Desert Theme.
+    Căn giữa tại (0, 0, 0), xoay tự do theo Frame3D.
+    - Cây xương rồng hình trụ lăng trụ 10 cạnh có vát đầu & đáy.
+    - Bông hoa 5 cánh màu hồng rực rỡ kèm nhụy vàng ở đỉnh.
+    - Khuôn mặt biểu cảm: mắt to hoạt hình, con ngươi đen, má hồng, miệng chữ O ngạc nhiên.
+    - Gai xương rồng hình chữ V trắng dọc theo các đường gờ.
+    """
+    scale = 0.55 if is_cube else 1.0
+    verts: List[Tuple[float, float, float]] = []
+    faces: List[List[int]] = []
+    colors: List[Tuple[int, int, int]] = []
+
+    N = 10  # 10 cạnh quanh thân trụ
+
+    # 1. Các tầng độ cao thân xương rồng (z, bán kính)
+    # Phần chân thu nhỏ vát thon rõ rệt để dễ phân biệt đỉnh đầu (nở tròn + gắn hoa) và chân
+    tiers = [
+        (-0.84, 0.16),  # chân đáy nhỏ vát gọn
+        (-0.65, 0.24),  # chân nở dần lên
+        (-0.15, 0.34),  # thân dưới
+        (+0.35, 0.40),  # thân trên tròn đầy
+        (+0.72, 0.39),  # vai đầu tròn nở
+        (+0.82, 0.24),  # vát đỉnh nơi gắn hoa
+    ]
+
+    tier_start_indices = []
+    for z_pos, rad in tiers:
+        tier_start_indices.append(len(verts))
+        for i in range(N):
+            ang = i * math.tau / N
+            r = rad * math.cos(ang)
+            c = rad * math.sin(ang)
+            verts.append((r * scale, c * scale, z_pos * scale))
+
+    col_green_base = (76, 175, 70)
+    col_green_ridge = (64, 158, 58)
+    col_green_light = (86, 192, 80)
+
+    for layer in range(len(tiers) - 1):
+        idx_a = tier_start_indices[layer]
+        idx_b = tier_start_indices[layer + 1]
+        for i in range(N):
+            next_i = (i + 1) % N
+            quad = [idx_a + i, idx_a + next_i, idx_b + next_i, idx_b + i]
+            faces.append(quad)
+            if i % 2 == 0:
+                col = col_green_light if layer >= 3 else col_green_base
+            else:
+                col = col_green_ridge
+            colors.append(col)
+
+    # Đáy dưới cùng
+    idx_bot = tier_start_indices[0]
+    bot_face = [idx_bot + i for i in reversed(range(N))]
+    faces.append(bot_face)
+    colors.append((45, 120, 42))
+
+    # Đỉnh trên cùng (nắp vát phẳng)
+    idx_top = tier_start_indices[-1]
+    top_face = [idx_top + i for i in range(N)]
+    faces.append(top_face)
+    colors.append((90, 195, 84))
+
+    # 2. Bông hoa màu hồng 5 cánh ở đỉnh (z = +0.81 đến +0.86)
+    flower_z = 0.82
+    flower_rad = 0.22
+    pistil_rad = 0.08
+    center_idx = len(verts)
+    verts.append((0.0, 0.0, (flower_z + 0.03) * scale))  # đỉnh nhụy
+
+    petals = 5
+    for p in range(petals):
+        ang_mid = p * math.tau / petals
+        ang_left = ang_mid - 0.35
+        ang_right = ang_mid + 0.35
+
+        v_mid = (flower_rad * math.cos(ang_mid) * scale, flower_rad * math.sin(ang_mid) * scale, (flower_z + 0.02) * scale)
+        v_left = (pistil_rad * 1.5 * math.cos(ang_left) * scale, pistil_rad * 1.5 * math.sin(ang_left) * scale, flower_z * scale)
+        v_right = (pistil_rad * 1.5 * math.cos(ang_right) * scale, pistil_rad * 1.5 * math.sin(ang_right) * scale, flower_z * scale)
+
+        pi0 = len(verts)
+        verts.extend([v_mid, v_left, v_right])
+        faces.append([pi0 + 1, pi0, pi0 + 2])
+        colors.append((245, 82, 130))  # Cánh hoa hồng tươi
+
+    # Nhụy vàng ở trung tâm bông hoa
+    pistil_idx = len(verts)
+    p_pts = []
+    for p in range(6):
+        ang = p * math.tau / 6
+        verts.append((pistil_rad * math.cos(ang) * scale, pistil_rad * math.sin(ang) * scale, (flower_z + 0.04) * scale))
+        p_pts.append(pistil_idx + p)
+    faces.append(p_pts)
+    colors.append((255, 215, 55))  # Nhụy vàng óng
+
+    # 3. Khuôn mặt biểu cảm ở mặt trước (+R):
+    for sign in (-1, 1):
+        eye_c = sign * 0.12 * scale
+        eye_r = 0.405 * scale
+        eye_z = 0.40 * scale
+        eye_rad = 0.075 * scale
+
+        # Tròng trắng
+        w_start = len(verts)
+        for k in range(6):
+            ang = k * math.tau / 6
+            c_off = eye_rad * math.sin(ang)
+            z_off = eye_rad * math.cos(ang)
+            verts.append((eye_r, eye_c + c_off, eye_z + z_off))
+        faces.append([w_start + k for k in reversed(range(6))])
+        colors.append((252, 252, 255))
+
+        # Con ngươi đen
+        pupil_start = len(verts)
+        pupil_r = 0.410 * scale
+        pupil_c = eye_c + (sign * 0.02) * scale
+        pupil_z = eye_z + 0.01 * scale
+        pupil_rad = 0.042 * scale
+        for k in range(5):
+            ang = k * math.tau / 5
+            c_off = pupil_rad * math.sin(ang)
+            z_off = pupil_rad * math.cos(ang)
+            verts.append((pupil_r, pupil_c + c_off, pupil_z + z_off))
+        faces.append([pupil_start + k for k in reversed(range(5))])
+        colors.append((22, 25, 30))
+
+        # Má hồng
+        blush_start = len(verts)
+        blush_r = 0.40 * scale
+        blush_c = sign * 0.18 * scale
+        blush_z = 0.24 * scale
+        for k in range(4):
+            ang = k * math.tau / 4
+            c_off = 0.045 * math.sin(ang) * scale
+            z_off = 0.025 * math.cos(ang) * scale
+            verts.append((blush_r, blush_c + c_off, blush_z + z_off))
+        faces.append([blush_start + k for k in reversed(range(4))])
+        colors.append((255, 145, 168))
+
+        # Lông mày xanh sẫm
+        brow_start = len(verts)
+        br_r = 0.405 * scale
+        br_c = sign * 0.12 * scale
+        br_z = 0.51 * scale
+        tilt = sign * 0.015 * scale
+        verts.append((br_r, br_c - 0.04 * scale, br_z - tilt))
+        verts.append((br_r, br_c + 0.04 * scale, br_z + tilt))
+        verts.append((br_r, br_c + 0.03 * scale, br_z + 0.025 * scale + tilt))
+        verts.append((br_r, br_c - 0.03 * scale, br_z + 0.025 * scale - tilt))
+        faces.append([brow_start, brow_start + 1, brow_start + 2, brow_start + 3])
+        colors.append((38, 105, 34))
+
+    # Miệng chữ O ngạc nhiên dễ thương ở giữa (r ~ +0.40, c ~ 0, z ~ 0.18)
+    mouth_start = len(verts)
+    m_r = 0.408 * scale
+    m_z = 0.18 * scale
+    for k in range(6):
+        ang = k * math.tau / 6
+        c_off = 0.05 * math.sin(ang) * scale
+        z_off = 0.07 * math.cos(ang) * scale
+        verts.append((m_r, c_off, m_z + z_off))
+    faces.append([mouth_start + k for k in reversed(range(6))])
+    colors.append((150, 32, 45))  # Đỏ rượu sâu
+
+    # 4. Gai xương rồng chữ V trắng (kim xương rồng) trên các sườn
+    spine_locs = [
+        (0.0, -0.45),
+        (0.0, 0.58),
+        (math.pi * 0.25, -0.15),
+        (-math.pi * 0.25, -0.15),
+        (math.pi * 0.5, 0.25),
+        (-math.pi * 0.5, 0.25),
+        (math.pi * 0.75, 0.10),
+        (-math.pi * 0.75, 0.10),
+        (math.pi, 0.35),
+        (math.pi, -0.35),
+    ]
+    for ang, sz in spine_locs:
+        rad = 0.402 if sz >= 0 else 0.34
+        rad *= 1.01
+        ct, st = math.cos(ang), math.sin(ang)
+        t_r, t_c = -st, ct
+        c_r, c_c = ct * rad, st * rad
+        sp_start = len(verts)
+        p0 = ((c_r - 0.035 * t_r) * scale, (c_c - 0.035 * t_c) * scale, (sz + 0.03) * scale)
+        p1 = (c_r * scale, c_c * scale, (sz - 0.03) * scale)
+        p2 = ((c_r + 0.035 * t_r) * scale, (c_c + 0.035 * t_c) * scale, (sz + 0.03) * scale)
+        verts.extend([p0, p1, p2])
+        faces.append([sp_start, sp_start + 1, sp_start + 2])
+        colors.append((250, 252, 242))
+
+    return verts, faces, colors
+
+
+def get_cactus_mesh(
+    is_cube: bool = False,
+) -> Tuple[List[Tuple[float, float, float]], List[List[int]], List[Tuple[int, int, int]]]:
+    """Trả về mô hình 3D low-poly cây xương rồng cho Desert Theme."""
+    cache_key = ("lowpoly_cactus", is_cube)
+    if cache_key in _CACHE:
+        return _CACHE[cache_key]
+    mesh = build_cactus_mesh(is_cube)
     _CACHE[cache_key] = mesh
     return mesh
