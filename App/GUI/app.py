@@ -514,7 +514,32 @@ class App:
         if self.session.status == Status.LOST:
             self.session.status = Status.PLAYING
             self.session.fail_reason = ""
+            if self.action_history:
+                entry = self.action_history.pop()
+                self.session.state = entry["prev_state"]
+                self.session.moves = entry["prev_moves"]
+                self.block_frame = entry["block_frame"]
+                self.cube_frames = list(entry["cube_frames"])
+                self.renderer.set_bridges(entry["prev_state"].bridges_state)
+            else:
+                self.block_frame = frame_for_orientation(self.session.state.orientation)
+                self.cube_frames = [INITIAL_FRAME, INITIAL_FRAME]
+            if self.frame_history:
+                self.frame_history.pop()
+            self.lost_cells = None
+            self.renderer.clear_fragile_falls()
             self.toast("Recovered from fall", theme.INFO)
+            pcs = pieces_of(self.session.state)
+            for idx, pc in enumerate(pcs):
+                if pc["kind"] == "cube" and len(pcs) == 2:
+                    pc["frame"] = self.cube_frames[idx]
+                else:
+                    pc["frame"] = self.block_frame
+            self.anims.append(SpawnAnim(
+                pcs,
+                on_start=lambda: self.audio.play("swap"),
+                on_finish=lambda: (self.renderer.squash_at(self.session.state.get_occupied_cells()), self.audio.play("roll")),
+            ))
             return
         if not self.action_history:
             if self.session.undo():
@@ -524,6 +549,8 @@ class App:
             return
 
         entry = self.action_history.pop()
+        if self.frame_history:
+            self.frame_history.pop()
         act = entry["action"]
         prev_st = entry["prev_state"]
 
