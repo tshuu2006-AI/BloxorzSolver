@@ -57,7 +57,7 @@ class CompareView:
         self.rows_rects: Dict[str, pygame.Rect] = {}
         self.btn_rerun = Button((PANEL.x + 40, PANEL.bottom - 84, 190, 52), "Run again", on_rerun)
         self.btn_save = Button((PANEL.x + 250, PANEL.bottom - 84, 190, 52), "Save CSV", on_save)
-        self.btn_race = Button((PANEL.x + 460, PANEL.bottom - 84, 230, 52), "Race selected", self._do_race)
+        self.btn_race = Button((PANEL.x + 460, PANEL.bottom - 84, 190, 52), "Race", self._do_race)
         self.btn_close = Button((PANEL.right - 230, PANEL.bottom - 84, 190, 52), "Close", on_close, "primary")
         self.buttons = [self.btn_rerun, self.btn_save, self.btn_race, self.btn_close]
 
@@ -115,7 +115,7 @@ class CompareView:
         if running is not None:
             status = f"Running {running}  ({len(rows)} / {data['total']} done)"
         elif rows:
-            status = "Click a row to replay its solution, or tick two algorithms and press Race selected."
+            status = "Click a row to replay its solution, or tick two algorithms and press Race."
         else:
             status = ""
         draw_text(surf, status, theme.font(20), theme.TEXT_DIM, (PANEL.x + 42, PANEL.y + 92))

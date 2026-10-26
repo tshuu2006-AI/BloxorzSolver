@@ -317,12 +317,17 @@ class App:
         self.btn_next = Button((r.x + 36, r.bottom - 70, 280, 50), "Next stage  (Enter)", self.next_level, "primary")
         self.btn_stages = Button((r.right - 316, r.bottom - 70, 280, 50), "Stage select  (N)", self.open_picker)
         self.btn_banner_undo = Button((r.x + 36, r.bottom - 70, 280, 50), "Undo  (Z)", self.undo, "primary")
-        self.btn_banner_restart = Button((r.right - 316, r.bottom - 70, 280, 50), "Restart  (R)", self.restart)
-        bw3 = 220
+        self.btn_banner_restart = Button((r.right - 316, r.bottom - 70, 280, 50), "Restart  (R / Enter)", self.restart)
+        cx_race = 40 + 1380 // 2
+        bw4 = 175
+        gap4 = 14
+        tot_w4 = 4 * bw4 + 3 * gap4
+        bx_race = cx_race - tot_w4 // 2
         self.race_buttons = [
-            Button((cx - 346, 966, bw3, 48), "Pause  (Space)", self.toggle_race_pause, font_size=19),
-            Button((cx - 346 + bw3 + 16, 966, bw3, 48), "Restart  (R)", self.restart_race, font_size=19),
-            Button((cx - 346 + 2 * (bw3 + 16), 966, bw3, 48), "Exit race  (Esc)", self.exit_race, "primary", font_size=19),
+            Button((bx_race, 956, bw4, 46), "Pause  (Space)", self.toggle_race_pause, font_size=16),
+            Button((bx_race + bw4 + gap4, 956, bw4, 46), "Restart  (R)", self.restart_race, font_size=16),
+            Button((bx_race + (bw4 + gap4) * 2, 956, bw4, 46), "Path: ON  (V)", self.toggle_path, font_size=16),
+            Button((bx_race + (bw4 + gap4) * 3, 956, bw4, 46), "Exit race  (Esc)", self.exit_race, "primary", font_size=16),
         ]
         self.tip_rect = pygame.Rect(cx - 330, 864, 660, 188)
         self.btn_tip_ok = Button(
@@ -391,6 +396,8 @@ class App:
         self.settings.set("arctic_theme", (theme_name == "arctic"))
         if hasattr(self, "renderer"):
             self.renderer.set_theme(theme_name)
+        if hasattr(self, "race") and self.race is not None:
+            self.race.set_theme(theme_name)
         self.thumbs.clear()
         self._rebuild_background()
         theme_title = "Arctic Expedition" if theme_name == "arctic" else "Desert Oasis"
@@ -1093,6 +1100,8 @@ class App:
             self.dismiss_tip()
         elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.session.status == Status.WON:
             self.next_level()
+        elif k in (pygame.K_RETURN, pygame.K_KP_ENTER) and self.session.status == Status.LOST:
+            self.restart()
         elif k == pygame.K_p:
             self.toggle_pause()
         elif k == pygame.K_v:
@@ -1425,7 +1434,13 @@ class App:
         self.compare_open = False
         self.restart()
         self.tip = None
-        self.race = Race(self.level, [row_a, row_b], self.cam, arctic_theme=self.settings.arctic_theme)
+        self.race = Race(
+            self.level,
+            [row_a, row_b],
+            self.cam,
+            area=pygame.Rect(40, 110, 1380, 820),
+            theme_name=self.current_theme,
+        )
         self.race_paused = False
 
     def exit_race(self):
@@ -1447,55 +1462,116 @@ class App:
             self.restart_race()
         elif k == pygame.K_v:
             self.toggle_path()
+        elif k == pygame.K_ESCAPE:
+            self.exit_race()
 
     def _draw_race_panel(self, surf):
         """Panel bên phải khi đua: số liệu của hai thuật toán đặt cạnh nhau (nhìn là so sánh được ngay)."""
-        pr = theme.PANEL_RECT
-        rrect(surf, pr, (*theme.PANEL, 232), 26, theme.PANEL_EDGE, 2)
-        x0, w = self.x0, self.pw
-        draw_text(surf, "RACE", theme.font(58, True), theme.ACCENT, (x0, 40))
-        draw_text(surf, "Same stage, two algorithms", theme.font(18), theme.TEXT_DIM, (x0 + 4, 112))
+        is_desert = (self.current_theme == "desert")
+        panel_rect = pygame.Rect(1444, 28, 448, 1024)
+        panel_bg = (34, 18, 28, 248) if is_desert else (14, 22, 38, 248)
+        panel_bdr = (215, 140, 60) if is_desert else (75, 145, 225)
+        top_glow = (255, 205, 80) if is_desert else (120, 240, 255)
+        accent_title = (255, 215, 120) if is_desert else (120, 240, 255)
+
+        rrect(surf, panel_rect, panel_bg, radius=18, border=panel_bdr, border_w=2)
+        pygame.draw.line(surf, top_glow, (panel_rect.x + 20, panel_rect.y + 2), (panel_rect.right - 20, panel_rect.y + 2), 2)
+
+        x0 = panel_rect.x + 20
+        pw = panel_rect.w - 40
+
+        draw_text(surf, "[ REAL-TIME BENCHMARK ]", theme.font(13, True), accent_title, (x0, panel_rect.y + 16))
+        draw_text(surf, "TELEMETRY STATS", theme.font(24, True), (245, 252, 255), (x0, panel_rect.y + 36))
+        draw_text(surf, f"Stage: {self.level.name}", theme.font(14), theme.TEXT_DIM, (x0, panel_rect.y + 68))
+
+        pygame.draw.line(surf, (60, 40, 52) if is_desert else (45, 75, 115), (x0, panel_rect.y + 92), (x0 + pw, panel_rect.y + 92), 1)
+
         from App.GUI.compare_view import fmt_value
 
         rows = (
-            ("Actions", "length", "{}"), ("Moves", "moves", "{}"), ("Cost", "cost", "{}"),
-            ("Expanded nodes", "expanded", None), ("Search time", "time_ms", None), ("Peak memory", "memory_kb", None),
+            ("Actions", "length", "{}"),
+            ("Moves", "moves", "{}"),
+            ("Cost", "cost", "{}"),
+            ("Expanded nodes", "expanded", None),
+            ("Search time", "time_ms", None),
+            ("Peak memory", "memory_kb", None),
         )
+
         for i, lane in enumerate(self.race.state.lanes):
-            card = pygame.Rect(x0, 160 + i * 330, w, 310)
+            card_y = panel_rect.y + 104 + i * 376
+            card = pygame.Rect(x0, card_y, pw, 360)
             col = LANE_COLORS[i]
-            rrect(surf, card, theme.CARD, 18, col, 2)
-            draw_text(surf, lane.label, theme.font(34, True), col, (card.x + 24, card.y + 18))
-            draw_text(
-                surf, f"step {lane.index} / {lane.total}", theme.font(18), theme.TEXT_DIM,
-                (card.right - 24, card.y + 28), "topright",
-            )
+            card_bg = (44, 24, 30, 210) if (is_desert and i == 0) else ((36, 18, 42, 210) if is_desert else ((24, 34, 54, 210) if i == 0 else (28, 22, 50, 210)))
+            rrect(surf, card, card_bg, radius=14, border=col, border_w=1)
+
+            # Header thẻ
+            draw_text(surf, lane.label, theme.font(22, True), col, (card.x + 16, card.y + 12))
+            pill_rect = pygame.Rect(card.right - 88, card.y + 12, 72, 24)
+            rrect(surf, pill_rect, (*col, 40), radius=6, border=col, border_w=1)
+            draw_text(surf, f"LANE {i + 1}", theme.font(12, True), col, pill_rect.center, "center")
+
+            # Tiến độ
+            draw_text(surf, f"Step {lane.index} / {lane.total}", theme.mono(15, True), (240, 250, 255), (card.x + 16, card.y + 44))
+            bar = pygame.Rect(card.x + 16, card.y + 66, pw - 32, 5)
+            rrect(surf, bar, (32, 20, 28) if is_desert else (20, 30, 48), radius=2)
+            frac = lane.index / max(1, lane.total)
+            rrect(surf, pygame.Rect(bar.x, bar.y, max(4, int(bar.w * frac)), bar.h), col, radius=2)
+
+            pygame.draw.line(surf, (60, 38, 48) if is_desert else (40, 56, 82), (card.x + 16, card.y + 80), (card.right - 16, card.y + 80), 1)
+
             for j, (name, key, fmt) in enumerate(rows):
                 v = lane.row.get(key)
                 text = fmt.format(v) if fmt else fmt_value(key, v)
-                y = card.y + 80 + j * 36
-                draw_text(surf, name, theme.font(18), theme.TEXT_DIM, (card.x + 24, y))
-                draw_text(surf, text, theme.mono(19, True), theme.TEXT, (card.right - 24, y), "topright")
-        for i, line in enumerate(wrap_text("Space pause   R restart   V path   Esc leave", theme.font(15), w)):
-            draw_text(surf, line, theme.font(15), theme.TEXT_FAINT, (x0 + 2, 1004 + i * 19))
+                ry = card.y + 88 + j * 44
+                if j % 2 == 1:
+                    rrect(surf, (card.x + 8, ry - 3, pw - 16, 38), (40, 25, 35, 120) if is_desert else (20, 32, 52, 120), radius=6)
+                draw_text(surf, name, theme.font(14), theme.TEXT_DIM, (card.x + 16, ry + 5))
+                draw_text(surf, text, theme.mono(15, True), (245, 252, 255), (card.right - 16, ry + 5), "topright")
+
+        # Thẻ kết quả / trạng thái cuộc đua ở đáy panel
+        verdict_y = panel_rect.y + 864
+        verdict_rect = pygame.Rect(x0, verdict_y, pw, 140)
+        verdict_bg = (28, 16, 24, 230) if is_desert else (18, 26, 44, 230)
+        verdict_bdr = (100, 58, 50) if is_desert else (50, 80, 125)
+        rrect(surf, verdict_rect, verdict_bg, radius=12, border=verdict_bdr, border_w=1)
+
+        if not self.race.state.done:
+            draw_text(surf, "RACE IN PROGRESS", theme.font(15, True), accent_title, (verdict_rect.centerx, verdict_y + 24), "center")
+            draw_text(surf, "Both solvers executing lockstep.", theme.font(13), theme.TEXT_DIM, (verdict_rect.centerx, verdict_y + 54), "center")
+            draw_text(surf, "Shortest path reaches goal first!", theme.font(13), theme.TEXT_FAINT, (verdict_rect.centerx, verdict_y + 80), "center")
+            draw_text(surf, "[Space] Pause   |   [R] Restart", theme.font(12), (160, 185, 215), (verdict_rect.centerx, verdict_y + 110), "center")
+        else:
+            draw_text(surf, "RACE FINISHED", theme.font(15, True), theme.GOOD, (verdict_rect.centerx, verdict_y + 22), "center")
+            draw_text(surf, self.race.state.headline(), theme.font(16, True), (245, 252, 255), (verdict_rect.centerx, verdict_y + 54), "center")
+            draw_text(surf, "Click 'Exit race' or press Esc to return.", theme.font(13), theme.TEXT_DIM, (verdict_rect.centerx, verdict_y + 92), "center")
+
     def _draw_race(self, mouse):
         surf = self.screen
         race = self.race
         surf.blit(self.bg, (0, 0))
         a, b = race.state.lanes
-        draw_text(surf, f"{a.label}  vs  {b.label}", theme.font(44, True), theme.TEXT, (56, 36))
-        draw_text(surf, f"Race on {self._level_title(self.level_idx)}", theme.font(22), theme.TEXT_DIM, (58, 92))
+        draw_text(surf, f"{a.label}   VS   {b.label}", theme.font(38, True), (245, 252, 255), (48, 28))
+        sub_txt = f"Real-Time Algorithm Race  |  Stage: {self._level_title(self.level_idx)}"
+        draw_text(surf, sub_txt, theme.font(16), theme.TEXT_DIM, (50, 74))
+
         race.draw(surf, mouse, self.show_path)
-        self._draw_toasts(surf)
         self._draw_race_panel(surf)
+
+        # Banner chiến thắng giữa 2 làn
         if race.state.done:
-            r = pygame.Rect(0, 0, 1000, 50)
-            r.midtop = (theme.BOARD_AREA.centerx, 906)
-            rrect(surf, r, (*theme.PANEL, 240), 25, theme.GOOD, 2)
-            draw_text(surf, race.state.headline(), theme.font(23, True), theme.GOOD, r.center, "center")
+            banner_r = pygame.Rect(0, 0, 742, 44)
+            banner_r.centerx = 40 + 1380 // 2
+            banner_r.y = 896
+            rrect(surf, banner_r, (*theme.PANEL, 245), radius=14, border=theme.GOOD, border_w=2)
+            draw_text(surf, race.state.headline(), theme.font(19, True), theme.GOOD, banner_r.center, "center")
+
+        # 4 nút điều khiển đua bên dưới 2 làn
         self.race_buttons[0].label = "Resume  (Space)" if self.race_paused else "Pause  (Space)"
+        self.race_buttons[2].label = "Path: ON  (V)" if self.show_path else "Path: OFF  (V)"
         for btn in self.race_buttons:
             btn.draw(surf)
+
+        self._draw_toasts(surf)
     # ------------------------------------------------------------------ gợi ý hướng dẫn
     def _maybe_show_tip(self):
         """Hiện gợi ý đến lượt (nếu có) khi màn mới nạp xong và không có lớp phủ nào đang mở."""

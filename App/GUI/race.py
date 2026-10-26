@@ -2,6 +2,7 @@
 
 Hai làn đi lockstep từng hành động nên lời giải ngắn hơn về đích trước. Mỗi làn có renderer,
 trạng thái cầu và màu khối riêng (vàng / tím) để dễ phân biệt.
+Hỗ trợ cả chủ đề Bắc Cực (chim cánh cụt) và Sa Mạc (cây xương rồng).
 """
 
 from __future__ import annotations
@@ -26,21 +27,46 @@ LANE_PATH = [(theme.INFO, theme.ACCENT), ((120, 200, 255), (178, 132, 250))]
 
 
 class Race:
-    def __init__(self, level, rows: Sequence[Dict], cam: Camera, area: Optional[pygame.Rect] = None, arctic_theme: bool = False):
+    def __init__(
+        self,
+        level,
+        rows: Sequence[Dict],
+        cam: Camera,
+        area: Optional[pygame.Rect] = None,
+        arctic_theme: bool = False,
+        theme_name: Optional[str] = None,
+    ):
         self.level = level
         self.state = RaceState(level, rows)
-        area = area or theme.BOARD_VIEW
-        gap = 14
+        if theme_name is not None:
+            self.theme_name = theme_name
+        else:
+            self.theme_name = "arctic" if arctic_theme else "desert"
+
+        # Bố cục 2 làn gọn gàng bên trái màn hình (để dành chỗ cho bảng telemetry bên phải)
+        area = area or pygame.Rect(40, 110, 1380, 820)
+        gap = 18
         w = (area.w - gap) // 2
         self.lane_rects = [
-            pygame.Rect(area.x + 10, area.y, w - 10, area.h),
-            pygame.Rect(area.x + w + gap, area.y, w - 10, area.h),
+            pygame.Rect(area.x, area.y, w, area.h),
+            pygame.Rect(area.x + w + gap, area.y, w, area.h),
         ]
         self.renderers: List[BoardRenderer] = [
-            BoardRenderer(level, area=r.inflate(-16, -90).move(0, 30), cam=cam, arctic_theme=arctic_theme) for r in self.lane_rects
+            BoardRenderer(
+                level,
+                area=r.inflate(-20, -110).move(0, 42),
+                cam=cam,
+                theme_name=self.theme_name,
+            )
+            for r in self.lane_rects
         ]
         self.paths = [path_steps(level.problem, lane.actions) for lane in self.state.lanes]
         self.restart()
+
+    def set_theme(self, theme_name: str) -> None:
+        self.theme_name = theme_name
+        for r in self.renderers:
+            r.set_theme(theme_name)
 
     # ------------------------------------------------------------------ điều khiển
     def restart(self) -> None:
@@ -110,41 +136,40 @@ class Race:
 
     def draw(self, surf, mouse, show_path: bool = True) -> None:
         ranks = self.state.ranks() if self.state.done else {}
+        is_desert = (self.theme_name == "desert")
         for i, lane in enumerate(self.state.lanes):
             rect = self.lane_rects[i]
             rd = self.renderers[i]
             col = LANE_COLORS[i]
-            rrect(surf, rect, (16, 20, 32, 150), 22, col, 2)
+            bg_col = (34, 20, 28, 200) if is_desert else (16, 24, 38, 200)
+            rrect(surf, rect, bg_col, 20, col, 2)
             rd.draw_board(surf)
             if show_path:
                 rd.draw_path(surf, self.paths[i], done=lane.index, palette=LANE_PATH[i])
             self._draw_lane_pieces(surf, i)
             rd.draw_particles(surf)
 
-            # tiêu đề làn
-            draw_text(surf, lane.label, theme.font(34, True), col, (rect.x + 24, rect.y + 16))
+            # Tiêu đề làn
+            draw_text(surf, lane.label, theme.font(28, True), col, (rect.x + 22, rect.y + 16))
             cost = lane.row.get("cost", "-")
             draw_text(
-                surf, f"step {lane.index}/{lane.total}    moves {lane.moves_done}    cost {cost}",
-                theme.font(19), theme.TEXT_DIM, (rect.x + 26, rect.y + 62),
+                surf, f"Step {lane.index}/{lane.total}   |   Moves {lane.moves_done}   |   Cost {cost}",
+                theme.font(16), theme.TEXT_DIM, (rect.x + 24, rect.y + 52),
             )
             if lane.finished and self.tween[i] is None:
                 rank = ranks.get(lane.label)
-                tag = "FINISHED"
-                if rank == 1 and len(set(ranks.values())) > 1:
-                    tag = "FINISHED FIRST"
-                elif rank == 2:
-                    tag = "FINISHED SECOND"
-                f = theme.font(17, True)
-                chip = pygame.Rect(0, 0, f.size(tag)[0] + 30, 32)
-                chip.topright = (rect.right - 22, rect.y + 20)
-                rrect(surf, chip, (*theme.GOOD, 46), 16, theme.GOOD, 2)
+                tag = "1ST PLACE" if rank == 1 else "2ND PLACE"
+                f = theme.font(15, True)
+                chip = pygame.Rect(0, 0, f.size(tag)[0] + 24, 28)
+                chip.topright = (rect.right - 18, rect.y + 18)
+                rrect(surf, chip, (*theme.GOOD, 50), 14, theme.GOOD, 2)
                 draw_text(surf, tag, f, theme.GOOD, chip.center, "center")
-            # thanh tiến độ
-            bar = pygame.Rect(rect.x + 26, rect.y + 92, rect.w - 52, 8)
-            rrect(surf, bar, (44, 52, 76), 4)
+
+            # Thanh tiến độ
+            bar = pygame.Rect(rect.x + 22, rect.y + 80, rect.w - 44, 6)
+            rrect(surf, bar, (42, 26, 36) if is_desert else (28, 40, 62), 3)
             frac = lane.index / max(1, lane.total)
-            rrect(surf, pygame.Rect(bar.x, bar.y, max(8, int(bar.w * frac)), bar.h), col, 4)
+            rrect(surf, pygame.Rect(bar.x, bar.y, max(6, int(bar.w * frac)), bar.h), col, 3)
 
     def _draw_lane_pieces(self, surf, i: int) -> None:
         lane = self.state.lanes[i]
@@ -160,7 +185,7 @@ class Race:
             if f > 0.7:
                 return  # đã rơi xuống hố
             goal = self.level.problem.goal_pos
-            piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True}
+            piece = {"cells": (goal,), "kind": "block", "height": 2.0, "active": True, "frame": self.lane_frames[i]}
             self._draw_piece(surf, i, piece, dz=-smoothstep(f / 0.7) * 2.1, alpha=1.0 - max(0.0, (f / 0.7 - 0.45) / 0.55))
             return
         for pc in sorted(pieces_of(lane.session.state), key=lambda q: self.renderers[i].iso.order(*q["cells"][0])):

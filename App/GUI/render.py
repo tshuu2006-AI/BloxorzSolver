@@ -941,6 +941,8 @@ class BoardRenderer:
                 p_faces_to_draw.sort(key=lambda item: item[0])
                 for _, q, n, fcol in p_faces_to_draw:
                     lum = 0.52 + 0.62 * max(0.0, _dot(n, self.iso.light))
+                    if color is not None and fcol == (245, 82, 130):
+                        fcol = color
                     col = shade(fcol, lum)
                     pts = [self.iso.p(*v) for v in q]
                     poly(surf, (*col, a255), pts)
