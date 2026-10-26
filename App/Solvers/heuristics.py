@@ -237,12 +237,7 @@ class ModifiedManhattanHeuristic(ManhattanHeuristic):
         row, col = cls._center(state)
         distance = abs(row - destination[0]) + abs(col - destination[1])
         movement = int((distance + 1.5 - 1e-9) // 1.5)
-        orientation_floor = {
-            Orientation.STANDING: 0,
-            Orientation.HORIZONTAL: 1,
-            Orientation.VERTICAL: 1,
-            Orientation.SPLIT: 2,
-        }[state.orientation]
+        separation = 0
         if state.orientation == Orientation.SPLIT:
             # One cube moves by at most one cell per roll. Reducing the
             # Manhattan separation to adjacency takes at least D - 1 rolls;
@@ -251,8 +246,51 @@ class ModifiedManhattanHeuristic(ManhattanHeuristic):
             r1, c1 = state._b1
             r2, c2 = state._b2
             separation = abs(r1 - r2) + abs(c1 - c2)
-            orientation_floor = max(2, separation)
-        return max(movement, orientation_floor)
+        return max(movement, separation)
+
+    def _search(
+        self,
+        current: State,
+        used: frozenset[int],
+        cost_so_far: int,
+        best: list,
+        split_switches: list,
+        problem: Problem,
+    ) -> None:
+        # Finishing directly from this position is always a candidate.
+        best[0] = min(
+            best[0],
+            cost_so_far + self._to_standing(current, problem.goal_pos),
+        )
+
+        for index, switch in enumerate(split_switches):
+            if index in used:
+                continue
+
+            # This leg includes the roll that activates the switch.
+            next_cost = cost_so_far + self._to_standing(current, switch.pos)
+
+            # Every teleport leaves a split block, which needs at least
+            # two more actions to merge and stand on the goal. Since all
+            # costs are nonnegative, this branch cannot improve best.
+            if next_cost + 2 >= best[0]:
+                continue
+
+            target_a, target_b = switch.split_targets
+            after_teleport = State(
+                Orientation.SPLIT,
+                target_a,
+                target_b,
+                active_block=getattr(switch, "split_active", 0),
+            )
+            self._search(
+                after_teleport,
+                used | {index},
+                next_cost,
+                best,
+                split_switches,
+                problem,
+            )
 
     def __call__(self, state: State, problem: Problem) -> float:
         split_switches = [
@@ -263,37 +301,9 @@ class ModifiedManhattanHeuristic(ManhattanHeuristic):
         ]
         best = [self._to_standing(state, problem.goal_pos)]
 
-        def search(current: State, used: frozenset[int], cost_so_far: int) -> None:
-            # Finishing directly from this position is always a candidate.
-            best[0] = min(
-                best[0],
-                cost_so_far + self._to_standing(current, problem.goal_pos),
-            )
+        self._search(state, frozenset(), 0, best, split_switches, problem)
 
-            for index, switch in enumerate(split_switches):
-                if index in used:
-                    continue
-
-                # This leg includes the roll that activates the switch.
-                next_cost = cost_so_far + self._to_standing(current, switch.pos)
-
-                # Every teleport leaves a split block, which needs at least
-                # two more actions to merge and stand on the goal. Since all
-                # costs are nonnegative, this branch cannot improve best.
-                if next_cost + 2 >= best[0]:
-                    continue
-
-                target_a, target_b = switch.split_targets
-                after_teleport = State(
-                    Orientation.SPLIT,
-                    target_a,
-                    target_b,
-                    active_block=getattr(switch, "split_active", 0),
-                )
-                search(after_teleport, used | {index}, next_cost)
-
-        search(state, frozenset(), 0)
-        return best[0]
+        return float(best[0])
 
     def __str__(self):
         return "Modified Manhattan"

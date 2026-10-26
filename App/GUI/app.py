@@ -444,7 +444,7 @@ class App:
         except (pygame.error, OSError) as exc:
             self.toast(f"Could not save screenshot: {exc}", theme.BAD, 4.0)
 
-    def _set_heuristic(self, name: str):
+    def set_heuristic(self, name: str):
         self.heuristic = name
         self.settings.set("astar_heuristic", name)
 
