@@ -1,0 +1,36 @@
+{
+  "name": "Teleport Trap Lab",
+  "group": "split",
+  "description": "Four split switches: two send the cubes to isolated dead ends, one creates a long detour, and one teleports near the goal. The direct route remains open.",
+  "grid": [
+    "#...#....#...#",
+    "..............",
+    "###p#####p####",
+    "##############",
+    "##############",
+    "S############G",
+    "##############",
+    "##############",
+    "###p#####p####",
+    ".############.",
+    ".############."
+  ],
+  "switches": [
+    {
+      "pos": [2, 3],
+      "targets": [[0, 0], [0, 13]]
+    },
+    {
+      "pos": [2, 9],
+      "targets": [[0, 4], [0, 9]]
+    },
+    {
+      "pos": [8, 3],
+      "targets": [[10, 1], [10, 12]]
+    },
+    {
+      "pos": [8, 9],
+      "targets": [[5, 10], [5, 12]]
+    }
+  ]
+}
