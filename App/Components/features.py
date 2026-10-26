@@ -1,3 +1,5 @@
+"""Board tile and switch definitions used by Bloxorz levels."""
+
 from enum import Enum
 from typing import List, Optional, Tuple
 

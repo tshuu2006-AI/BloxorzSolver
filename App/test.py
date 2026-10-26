@@ -1,3 +1,5 @@
+"""Sample Bloxorz levels, solver test runs, and solution replay helpers."""
+
 import argparse
 import sys
 from typing import List, Optional
