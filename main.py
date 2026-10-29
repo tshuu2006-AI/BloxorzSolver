@@ -10,6 +10,7 @@ if hasattr(sys.stdout, "reconfigure"):
 
 from App.Components.state import State
 from App.Components.features import TileType
+from App.Solvers.BFS_solver import BFSSolver
 from App.Solvers.DFS_solver import DFSSolver
 from App.Solvers.UCS_solver import UCSSolver
 from App.Solvers.A_star_solver import AstarSolver
@@ -48,7 +49,11 @@ def get_test_cases():
 
 
 def run_single_solver(solver_name: str, heuristic: str = "relaxed"):
-    if solver_name == "dfs":
+    solver_name = solver_name.lower()
+    if solver_name == "bfs":
+        solver = BFSSolver()
+        label = "Breadth-First Search (BFS)"
+    elif solver_name == "dfs":
         solver = DFSSolver()
         label = "Depth-First Search (DFS)"
     elif solver_name == "ucs":
@@ -80,6 +85,7 @@ def run_benchmark_comparison():
     print("=" * 80)
 
     solvers = [
+        ("BFS", lambda: BFSSolver()),
         ("DFS", lambda: DFSSolver()),
         ("UCS", lambda: UCSSolver()),
         ("A* (relaxed)", lambda: AstarSolver()),
@@ -113,9 +119,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Bloxorz Solver Runner")
     parser.add_argument(
         "--solver",
-        choices=("dfs", "ucs", "astar", "compare"),
+        choices=("bfs", "dfs", "ucs", "astar", "compare"),
         default="compare",
-        help="Thuật toán muốn chạy: dfs, ucs, astar, hoặc compare (mặc định: compare)",
+        help="Thuật toán muốn chạy: bfs, dfs, ucs, astar, hoặc compare (mặc định: compare)",
     )
     parser.add_argument(
         "--heuristic",

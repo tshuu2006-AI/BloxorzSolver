@@ -6,20 +6,21 @@ Bloxorz game (pygame GUI) plus search solvers (BFS / DFS / UCS / A*) for the CSC
 
 ```bash
 pip install -r requirements.txt
-python play.py          # open the game (starts at Classic 01)
-python play.py classic 12   # jump to Classic 12;  `python play.py custom 5` = custom stage 5
-python -m App.test --solver ucs   # CLI check of the hand-built test levels
-python -m unittest discover -s tests -t .   # unit tests
+python play.py                      # open the game
+python play.py classic 12           # jump to Classic 12;  `python play.py custom 5` = custom stage 5
+python App/test.py --solver all     # test all solvers (BFS, DFS, UCS, A*) on sample stages
+python main.py                      # benchmark comparison table across test stages
+python -m unittest discover -s tests -t .   # unit tests (121 tests)
 ```
 
 Controls: arrows / WASD roll the block (the "Move keys" compass in the corner shows where each key goes on
 screen, and gold arrows on the floor show the same around the piece you control), `Space` swaps the active cube
-when split, `R` restart, `Z` undo, `N` stage select, `Enter` next stage after a win, `F11` fullscreen.
+when split, `R` restart (or `Enter` on game over), `Z` undo, `N` stage select, `Enter` next stage after a win, `F11` fullscreen.
 
 Camera: `Q`/`E` or mouse wheel zoom, right-mouse drag rotates and tilts (or `[` `]` rotate, `PgUp`/`PgDn` tilt),
 middle-mouse drag pans, `C` resets the view.
 
-**Compare all** (next to the SOLVERS label) runs every available algorithm on the current stage one after another (each in its own process, 60 s timeout, so a slow one can't freeze the game) and opens a table of moves, cost, expanded nodes, time and peak memory with bars, the best value per column highlighted, and an *optimal* tag. Click a row to replay that algorithm's solution; **Save CSV** writes `results/compare_<stage>.csv`. BFS is skipped automatically until `App/Solvers/BFS_solver.py` exists.
+**Compare all** (next to the SOLVERS label) runs every available algorithm on the current stage one after another (each in its own process, 60 s timeout, so a slow one can't freeze the game) and opens a table of moves, cost, expanded nodes, time and peak memory with bars, the best value per column highlighted, and an *optimal* tag. Click a row to replay that algorithm's solution; **Save CSV** writes `results/compare_<stage>.csv`. All four solvers (BFS, DFS, UCS, A*) are fully supported.
 
 After a solver finishes, its path is drawn on the board as numbered tiles (`V` or the Path button toggles it). While a replay is paused,
 `,` and `.` (or the arrow buttons) step it backward and forward. Cleared stages and your best move counts are remembered in
@@ -32,7 +33,7 @@ The window is a 1920x1080 canvas scaled to your screen.
 | Path | What |
 |---|---|
 | `App/Components/` | Rules engine shared by the game and solvers: `state.py`, `features.py`, `problem.py`, `node.py`, and `level_loader.py` (JSON -> `Problem`) |
-| `App/Solvers/` | Search algorithms (`BaseSolver`, DFS, UCS, A*) |
+| `App/Solvers/` | Search algorithms (`BaseSolver`, BFS, DFS, UCS, A*) |
 | `App/Game/` | GUI-independent game logic: `GameSession` (moves, undo, win/fall), `solver_bridge.py` (runs a solver from the GUI), `experiment.py` / `compare.py` (Compare all), `race_logic.py`, `settings.py`, `progress.py`, `tips.py`, `links.py`, `path.py`, `synth.py` (sound effects) |
 | `App/GUI/` | pygame app (`app.py`), isometric renderer (`render.py`), `race.py`, `compare_view.py`, `audio.py`, widgets, theme |
 | `play.py` | Launches the game (`python play.py [classic\|custom] [n]`) |
@@ -112,7 +113,7 @@ Recreated from the original game; see `levels/classic/NOTICE.md` for the source 
 ### Settings, tips and extras
 
 The right-hand panel has two tabs (**Tab** switches): **PLAY** keeps the everyday controls, **SETTINGS** holds the rest
-(move-keys compass, camera help, floor arrows, switch link lines, default tilt, tips, camera reset, screenshot, reset progress).
+(theme selection: Antarctica / Desert, move-keys compass, camera help, floor arrows, switch link lines, default tilt, tips, camera reset, screenshot, reset progress).
 The A* heuristic selector stays on the PLAY tab next to the solver buttons. Choices are saved to `.bloxorz_settings.json` (git-ignored).
 
 - **Switch link lines** (off by default): dashed lines from each switch to the bridges it controls (dot = opens, x = closes,
@@ -122,12 +123,12 @@ The A* heuristic selector stays on the PLAY tab next to the solver buttons. Choi
 - **Split cubes**: the cube you control is bright with a white outline and a bouncing arrow; the other is dark and translucent.
 - **Screenshots**: `F12` or the Settings button saves `screenshots/bloxorz_<time>.png` (git-ignored).
 - **Polish**: the block squashes a little when it lands, a soft glow with rising sparks marks a switch that fires
-  (and the bridges it changes), the goal hole opens and swallows the block on a win (it shrinks and darkens as it
-  drops in), and the stage picker shows isometric previews drawn by the same renderer as the board.
+  (and the bridges it changes), the goal hole opens and swallows the block on a win (dropping inside with sound effects),
+  and the stage picker shows isometric previews with page numbers and arrow buttons.
 - **Sound**: short effects (landing thud, switch click, bridge open/close, split/merge, fall, win) are synthesized in
   code (`App/Game/synth.py`), so there are no audio files. `M` or Settings > Sound mutes them; volume is a slider
   there. If no audio device exists the game simply stays silent.
-- **Race**: in the Compare table, tick two algorithms and press **Race selected** to play their solutions side by side, each on
+- **Race**: in the Compare table, tick two algorithms and press **Race** to play their solutions side by side, each on
   its own board, one action at a time, with per-algorithm stats and a "who arrives first" result.
 ## Benchmark (for the report's Experiments section)
 
@@ -139,7 +140,7 @@ python tools/benchmark.py --set custom --levels 1-8,20 --solvers "UCS,A*"
 python tools/benchmark.py --plots                   # also writes results/*.png
 ```
 
-It runs BFS (once `BFS_solver.py` exists), DFS, UCS, "UCS (risk)" (fragile tiles cost +10, like Test 2B), and A* with each
+It runs BFS, DFS, UCS, "UCS (risk)" (fragile tiles cost +10, like Test 2B), and A* with each
 heuristic, records search time, peak memory, expanded nodes, solution length/cost, and checks that every solution replays
 to the goal. Results go to `results/benchmark.csv` (git-ignored) plus an optional chart per metric and a per-group summary.
 

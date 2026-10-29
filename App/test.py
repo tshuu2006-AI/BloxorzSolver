@@ -8,9 +8,17 @@ from typing import List, Optional
 if hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8")
 
+from pathlib import Path
+
+# Ensure project root is in sys.path for direct execution (e.g. `python App/test.py`)
+_ROOT = Path(__file__).resolve().parent.parent
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
+
 from App.Components.features import TileType, SwitchType, SwitchMode, Switch
 from App.Components.state import Orientation, State
 from App.Components.problem import Problem
+from App.Solvers.BFS_solver import BFSSolver
 from App.Solvers.DFS_solver import DFSSolver
 from App.Solvers.UCS_solver import UCSSolver
 from App.Solvers.A_star_solver import AstarSolver, HEURISTICS
@@ -350,77 +358,129 @@ def build_test_5_hardcore_stage() -> Problem:
     )
 
 
+def run_test_suite_for_solver(solver, solver_label: str, test_filter: str = "all"):
+    """Chạy bộ test case cho một thuật toán cụ thể."""
+    print("=" * 70)
+    print(f"CHẠY KIỂM THỬ THUẬT TOÁN: {solver_label}")
+    print("=" * 70)
+
+    # Chạy Test 1
+    if test_filter in ("1", "all"):
+        print("\n--- TEST 1: Màn cơ bản (Basic Rolling) ---")
+        p1 = build_test_1_basic()
+        sol1 = solver.solve(p1)
+        verify_and_replay(p1, sol1, solver.get_metrics())
+
+    # So sánh đường đi với chi phí mặc định và mức phạt fragile cao.
+    if test_filter in ("2", "all"):
+        print("--- TEST 2A: Màn Fragile (Chi phí mặc định) ---")
+        p2 = build_test_2_fragile()
+        sol2 = solver.solve(p2)
+        verify_and_replay(p2, sol2, solver.get_metrics())
+
+        print("--- TEST 2B: Màn Fragile (Tăng phạt ô FRAGILE lên +10) ---")
+        p2_b = build_test_2_fragile()
+        def high_risk_cost(s: State, a: str, s_new: State) -> int:
+            cost = 2
+            for cell in s_new.get_occupied_cells():
+                if p2_b.grid.get(cell) == TileType.FRAGILE:
+                    cost += 10
+            return cost
+
+        p2_b.action_cost = high_risk_cost
+        sol2_safe = solver.solve(p2_b)
+        verify_and_replay(p2_b, sol2_safe, solver.get_metrics())
+
+    # Chạy Test 3
+    if test_filter in ("3", "all"):
+        print("--- TEST 3: Màn có Cầu & Công tắc (Soft + Heavy Switches) ---")
+        p3 = build_test_3_bridges_and_switches()
+        sol3 = solver.solve(p3)
+        verify_and_replay(p3, sol3, solver.get_metrics())
+
+    # Chạy Test 4
+    if test_filter in ("4", "all"):
+        print("--- TEST 4: Màn Tách khối (Split Switch), Đổi khối & Hợp nhất (Merge) ---")
+        p4 = build_test_4_split_and_merge()
+        sol4 = solver.solve(p4)
+        verify_and_replay(p4, sol4, solver.get_metrics())
+
+    # Chạy Test 5 (Bản đồ lớn & phức tạp)
+    if test_filter in ("5", "all"):
+        print("--- TEST 5: Map Lớn 'The Gauntlet' ---")
+        p5 = build_test_5_hardcore_stage()
+        print_ascii_map(p5)
+        sol5_uniform = solver.solve(p5)
+        verify_and_replay(p5, sol5_uniform, solver.get_metrics())
+
+
+def make_solver(name: str, heuristic: str = "relaxed"):
+    """Tạo đối tượng solver theo tên và cấu hình."""
+    name = name.lower()
+    if name == "bfs":
+        return BFSSolver(), "Breadth-First Search (BFS)"
+    elif name == "dfs":
+        return DFSSolver(), "Depth-First Search (DFS)"
+    elif name == "ucs":
+        return UCSSolver(), "Uniform-Cost Search (UCS)"
+    elif name == "astar":
+        solver = AstarSolver()
+        solver.heuristic = heuristic
+        return solver, f"A* ({heuristic})"
+    raise ValueError(f"Thuật toán không hợp lệ: {name}")
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Run the Bloxorz sample problems.")
     parser.add_argument(
-        "--solver", choices=("dfs", "ucs", "astar"), default="dfs",
-        help="Search algorithm to use: dfs, ucs, or astar (default: dfs).",
+        "--solver",
+        type=str.lower,
+        choices=("bfs", "dfs", "ucs", "astar", "all"),
+        default="bfs",
+        help="Search algorithm to use: bfs, dfs, ucs, astar, or all (default: bfs).",
     )
     parser.add_argument(
-        "--heuristic", choices=tuple(HEURISTICS),
+        "--heuristic",
+        type=str.lower,
+        choices=tuple(HEURISTICS.keys()) + ("all",),
         default="relaxed",
-        help="A* heuristic (only used with --solver astar; default: relaxed).",
+        help="A* heuristic (only used with --solver astar or all; default: relaxed).",
+    )
+    parser.add_argument(
+        "--test",
+        type=str.lower,
+        choices=("1", "2", "3", "4", "5", "all"),
+        default="all",
+        help="Specific test case to run: 1, 2, 3, 4, 5, or all (default: all).",
     )
     return parser.parse_args()
 
 
 if __name__ == "__main__":
     args = parse_args()
-    if args.solver == "astar":
-        solver = AstarSolver()
-        solver.heuristic = args.heuristic
-        solver_label = f"A* ({args.heuristic})"
-    elif args.solver == "dfs":
-        solver = DFSSolver()
-        solver_label = "Depth-First Search (DFS)"
+    selected_solver = args.solver
+    selected_heuristic = args.heuristic
+    selected_test = args.test
+
+    solvers_to_run = []
+    if selected_solver == "all":
+        solvers_to_run.append(("bfs", "relaxed"))
+        solvers_to_run.append(("dfs", "relaxed"))
+        solvers_to_run.append(("ucs", "relaxed"))
+        if selected_heuristic == "all":
+            for h in HEURISTICS:
+                solvers_to_run.append(("astar", h))
+        else:
+            solvers_to_run.append(("astar", selected_heuristic))
+    elif selected_solver == "astar":
+        if selected_heuristic == "all":
+            for h in HEURISTICS:
+                solvers_to_run.append(("astar", h))
+        else:
+            solvers_to_run.append(("astar", selected_heuristic))
     else:
-        solver = UCSSolver()
-        solver_label = "Uniform-Cost Search (UCS)"
+        solvers_to_run.append((selected_solver, selected_heuristic))
 
-    print("=" * 70)
-    print(f"CHẠY KIỂM THỬ THUẬT TOÁN {solver_label}")
-    print("=" * 70)
-
-    # Chạy Test 1
-    print("\n--- TEST 1: Màn cơ bản (Basic Rolling) ---")
-    p1 = build_test_1_basic()
-    sol1 = solver.solve(p1)
-    verify_and_replay(p1, sol1, solver.get_metrics())
-
-    # So sánh đường đi với chi phí mặc định và mức phạt fragile cao.
-    print("--- TEST 2A: Màn Fragile (Chi phí mặc định) ---")
-    p2 = build_test_2_fragile()
-    sol2 = solver.solve(p2)
-    verify_and_replay(p2, sol2, solver.get_metrics())
-
-    print("--- TEST 2B: Màn Fragile (Tăng phạt ô FRAGILE lên +10) ---")
-    # Ghi đè thử nghiệm hàm chi phí phạt nặng ô FRAGILE để xem UCS tự động đi đường vòng
-    def high_risk_cost(s: State, a: str, s_new: State) -> int:
-        cost = 2
-        for cell in s_new.get_occupied_cells():
-            if p2.grid.get(cell) == TileType.FRAGILE:
-                cost += 10
-        return cost
-
-    p2.action_cost = high_risk_cost
-    sol2_safe = solver.solve(p2)
-    verify_and_replay(p2, sol2_safe, solver.get_metrics())
-
-    # Chạy Test 3
-    print("--- TEST 3: Màn có Cầu & Công tắc (Soft + Heavy Switches) ---")
-    p3 = build_test_3_bridges_and_switches()
-    sol3 = solver.solve(p3)
-    verify_and_replay(p3, sol3, solver.get_metrics())
-
-    # Chạy Test 4
-    print("--- TEST 4: Màn Tách khối (Split Switch), Đổi khối & Hợp nhất (Merge) ---")
-    p4 = build_test_4_split_and_merge()
-    sol4 = solver.solve(p4)
-    verify_and_replay(p4, sol4, solver.get_metrics())
-
-    # Chạy Test 5 (Bản đồ lớn & phức tạp)
-    print("--- TEST 5: Map Lớn 'The Gauntlet' ---")
-    p5 = build_test_5_hardcore_stage()
-    print_ascii_map(p5)
-    sol5_uniform = solver.solve(p5)
-    verify_and_replay(p5, sol5_uniform, solver.get_metrics())
+    for s_name, h_name in solvers_to_run:
+        solver_obj, solver_label = make_solver(s_name, h_name)
+        run_test_suite_for_solver(solver_obj, solver_label, test_filter=selected_test)
