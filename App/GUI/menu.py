@@ -587,13 +587,10 @@ class MainMenu:
         pygame.draw.line(surf, (50, 90, 135), (mx + 60, my + 78), (mx + mw - 60, my + 78), 2)
 
         lines = [
-            ("Course", "Co so Tri tue Nhan tao (CSAI) - HK5 2025-2026"),
-            ("Institution", "Truong Dai hoc Khoa hoc Tu nhien, DHQG-HCM"),
-            ("Project", "Do an 1: Bloxorz Solver & Commercial Indie UI"),
+            ("Course", "Cơ sở Trí tuệ Nhân tạo (CSAI)"),
+            ("Institution", "Trường Đại học Khoa học Tự nhiên - ĐHQG HCM"),
+            ("Project", "Bloxorz Solver"),
             ("AI Solvers", "BFS, DFS, UCS, A* (Manhattan, Euclidean, Walking Dist, Pattern DB)"),
-            ("Special Modes", "Algorithm Race Arena, Multi-solver Benchmark & Visual Replay"),
-            ("Visual Art", "Isometric 2.5D Polar Abyssal Engine with 3D Penguin"),
-            ("Audio", "Real-time Procedural Synthesizer (No external audio files)"),
         ]
 
         text_y = my + 110
