@@ -216,6 +216,11 @@ class BoardRenderer:
         # Tấm sàn fragile hiện đang rơi cùng block; không vẽ lại ở mặt bàn.
         self.falling_fragile_cells: set[Cell] = set()
         self._fxbuf: Optional[pygame.Surface] = None
+        # Lớp bàn tĩnh (bóng + ô sàn + cầu + công tắc) vẽ sẵn một lần, dùng lại tới khi
+        # góc nhìn, theme hay trạng thái cầu đổi; chỉ phần nhấp nháy được vẽ lại mỗi khung.
+        self._cam_gen = 0
+        self._static_key = None
+        self._static_layer: Optional[pygame.Surface] = None
 
         if theme_name is not None:
             self._theme_name = theme_name
@@ -278,6 +283,7 @@ class BoardRenderer:
     def set_camera(self, cam: Camera) -> None:
         """Dựng lại phép chiếu và thứ tự vẽ khi góc nhìn đổi."""
         self.iso = Iso(self.level.rows, self.level.cols, self.area, cam, self.min_fit)
+        self._cam_gen = getattr(self, "_cam_gen", 0) + 1
         self.tile_order = sorted(
             self.problem.grid, key=lambda rc: (self.iso.order(*rc), rc[0], rc[1])
         )
@@ -520,7 +526,20 @@ class BoardRenderer:
             ]
             for rad, col in rings:
                 poly(surf, col, self._ring(cell, rad, n=24, z=0.018))
-            pulse = 0.5 + 0.5 * math.sin(self.time * 3.0)
+            return
+
+        rings = (
+            [(0.82, (26, 48, 82)), (0.68, (14, 32, 60)), (0.52, (8, 18, 40)), (0.34, (2, 6, 18))]
+            if self.is_arctic
+            else [(0.82, (46, 52, 74)), (0.68, (28, 32, 48)), (0.52, (14, 16, 26)), (0.34, (5, 6, 11))]
+        )
+        for size, col in rings:
+            poly(surf, col, self._diamond(cell, size / 2, 0.015))
+
+    def _draw_goal_pulse(self, surf, cell):
+        """Các vòng sáng nhấp nháy quanh hố đích (vẽ lại mỗi khung, không nằm trong lớp tĩnh)."""
+        pulse = 0.5 + 0.5 * math.sin(self.time * 3.0)
+        if self.is_desert:
             for grow, a in ((0.0, 220), (0.05, 130), (0.10, 65)):
                 r_pts = self._ring(cell, 0.38 + grow * (0.08 + 0.04 * pulse), n=24, rot=self.time * 0.8, z=0.022)
                 gfx.aapolygon(
@@ -530,29 +549,12 @@ class BoardRenderer:
                 )
             return
 
-        if self.is_arctic:
-            # Lỗ băng sâu mở ra vùng nước bắc cực thẫm màu
-            rings = [(0.82, (26, 48, 82)), (0.68, (14, 32, 60)), (0.52, (8, 18, 40)), (0.34, (2, 6, 18))]
-            for size, col in rings:
-                poly(surf, col, self._diamond(cell, size / 2, 0.015))
-            pulse = 0.5 + 0.5 * math.sin(self.time * 3.0)
-            for grow, a in ((0.0, 210), (0.05, 120), (0.10, 60)):
-                gfx.aapolygon(
-                    surf,
-                    [(int(x), int(y)) for x, y in self._diamond(cell, 0.41 + grow * (0.6 + pulse), 0.02)],
-                    (*theme.ARCTIC_GOAL_RING, int(a * (0.55 + 0.45 * pulse))),
-                )
-            return
-
-        rings = [(0.82, (46, 52, 74)), (0.68, (28, 32, 48)), (0.52, (14, 16, 26)), (0.34, (5, 6, 11))]
-        for size, col in rings:
-            poly(surf, col, self._diamond(cell, size / 2, 0.015))
-        pulse = 0.5 + 0.5 * math.sin(self.time * 3.0)
+        ring_col = theme.ARCTIC_GOAL_RING if self.is_arctic else theme.GOAL_RING
         for grow, a in ((0.0, 210), (0.05, 120), (0.10, 60)):
             gfx.aapolygon(
                 surf,
                 [(int(x), int(y)) for x, y in self._diamond(cell, 0.41 + grow * (0.6 + pulse), 0.02)],
-                (*theme.GOAL_RING, int(a * (0.55 + 0.45 * pulse))),
+                (*ring_col, int(a * (0.55 + 0.45 * pulse))),
             )
 
     def _draw_bridge(self, surf, cell):
@@ -656,7 +658,45 @@ class BoardRenderer:
         max_order: Optional[float] = None,
         force_include_cells: Optional[set] = None,
         exclude_cells: Optional[set] = None,
+        background: Optional[pygame.Surface] = None,
     ) -> None:
+        """Vẽ bàn cờ.
+
+        Với ``background`` (ảnh nền cùng cỡ ``surf``), lần vẽ đầy đủ dùng một lớp tĩnh
+        "nền + bóng + ô sàn" dựng sẵn: dán cả lớp lên ``surf`` thay cho việc tự dán nền,
+        rồi chỉ vẽ lại phần nhấp nháy. Lớp được dựng lại khi góc nhìn, theme, trạng thái
+        cầu hoặc nền đổi; trong lúc cầu đang chuyển động thì vẽ đầy đủ như cũ.
+        """
+        plain = (
+            min_order is None and max_order is None and not force_include_cells
+            and not exclude_cells and not self.falling_fragile_cells
+        )
+        if background is not None and not (plain and background.get_size() == surf.get_size()):
+            surf.blit(background, (0, 0))
+            background = None
+        if background is not None and all(v in (0.0, 1.0) for v in self.bridge_v):
+            surf.blit(self._get_static_layer(background), (0, 0))
+            if self.problem.goal_pos in self.problem.grid:
+                self._draw_goal_pulse(surf, self.problem.goal_pos)
+        else:
+            if background is not None:
+                surf.blit(background, (0, 0))
+            self._draw_tiles(surf, min_order, max_order, force_include_cells, exclude_cells, pulse=True)
+        if show_hints and min_order is None:
+            for sw in self.problem.switches.values():
+                if sw.split_targets:
+                    self._draw_split_hint(surf, sw.split_targets)
+
+    def _get_static_layer(self, background: pygame.Surface) -> pygame.Surface:
+        key = (self._cam_gen, self._theme_name, tuple(self.bridge_v), id(background), background.get_size())
+        if key != self._static_key or self._static_layer is None:
+            layer = background.copy()  # vẽ lên nền đục để pha màu bóng / viền khử răng cưa y như vẽ trực tiếp
+            self._draw_tiles(layer, None, None, None, None, pulse=False)
+            self._static_layer = layer
+            self._static_key = key
+        return self._static_layer
+
+    def _draw_tiles(self, surf, min_order, max_order, force_include_cells, exclude_cells, pulse: bool) -> None:
         grid = self.problem.grid
         # Bóng đổ nhẹ phía dưới bàn: chỉ vẽ ở pass đầu (khi min_order is None)
         if min_order is None:
@@ -686,15 +726,13 @@ class BoardRenderer:
                 self._draw_bridge(surf, cell)
             elif tile == TileType.GOAL:
                 self._draw_goal(surf, cell)
+                if pulse:
+                    self._draw_goal_pulse(surf, cell)
             else:
                 self._draw_floor(surf, cell, tile)
             sw = self.problem.switches.get(cell)
             if sw is not None:
                 self._draw_switch(surf, cell, sw)
-        if show_hints and min_order is None:
-            for sw in self.problem.switches.values():
-                if sw.split_targets:
-                    self._draw_split_hint(surf, sw.split_targets)
 
     def draw_direction_hints(self, surf, cells: Sequence[Cell], flash=None) -> None:
         """Mũi tên dẹt trên sàn quanh khối đang điều khiển: chỉ bốn hướng có thể lăn.

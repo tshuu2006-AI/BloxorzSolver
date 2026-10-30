@@ -734,7 +734,8 @@ class LevelSelectView:
                 bg = (34, 18, 26) if is_desert else (20, 30, 48)
                 border = (110, 60, 52) if is_desert else (56, 90, 135)
             rrect(surf, r, bg, radius=8, border=border, border_w=2 if active else 1)
-            label = "CLASSIC (33)" if tab_key == "classic" else "CUSTOM (20)"
+            count = sum(1 for lv in self.app.levels if lv.section == tab_key)
+            label = f"{tab_key.upper()} ({count})"
             col = (255, 255, 255) if active else (175, 205, 235)
             draw_text(surf, label, theme.font(17, bold=True), col, r.center, "center")
 

@@ -1,4 +1,4 @@
-"""Chạy solver của cả nhóm từ GUI (luồng nền) và lấy lại lời giải + số liệu.
+"""Chạy solver của cả nhóm từ GUI (tiến trình con, dừng được) và lấy lại lời giải + số liệu.
 
 Quy ước đặt tên để GUI tự tìm solver (đã khớp với code hiện có)::
 
@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import importlib
 import importlib.util
+import multiprocessing as mp
+import queue
 import threading
+import time
 import traceback
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
@@ -77,14 +80,30 @@ class SolveOutcome:
     actions: Optional[List[str]] = None
     metrics: dict = field(default_factory=dict)
     error: str = ""
+    cancelled: bool = False
 
     @property
     def found(self) -> bool:
         return self.actions is not None
 
 
+def _solve_child(problem: Problem, name: str, heuristic: Optional[str], out) -> None:
+    """Chạy trong tiến trình con: giải ``problem`` và gửi kết quả về qua hàng đợi ``out``."""
+    try:
+        solver = make_solver(name, heuristic)
+        actions = solver.solve(problem)
+        out.put(("ok", actions, solver.get_metrics()))
+    except Exception as exc:  # báo lỗi của solver lên GUI thay vì làm sập game
+        traceback.print_exc()
+        out.put(("error", f"{type(exc).__name__}: {exc}", {}))
+
+
 class SolverJob(threading.Thread):
-    """Chạy ``solver.solve(problem)`` ở luồng nền; GUI đọc ``outcome`` khi ``done``."""
+    """Giải một màn trong tiến trình con; GUI đọc ``outcome`` khi ``done``.
+
+    Chạy ở tiến trình riêng nên tìm kiếm dài không làm giật khung hình (không tranh GIL),
+    ``tracemalloc`` của solver không ảnh hưởng game, và ``cancel()`` dừng được ngay.
+    """
 
     def __init__(self, name: str, problem: Problem, heuristic: Optional[str] = None):
         super().__init__(daemon=True)
@@ -93,20 +112,58 @@ class SolverJob(threading.Thread):
         self.heuristic = heuristic
         self.label = f"A* ({heuristic})" if name == "A*" and heuristic else name
         self.outcome: Optional[SolveOutcome] = None
+        self.started_at = time.perf_counter()
+        self._cancel = threading.Event()
 
     @property
     def done(self) -> bool:
         return self.outcome is not None
 
+    @property
+    def elapsed(self) -> float:
+        return time.perf_counter() - self.started_at
+
+    def cancel(self) -> None:
+        self._cancel.set()
+
+    def _finish(self, **kw) -> None:
+        self.outcome = SolveOutcome(self.name_, self.label, **kw)
+
     def run(self) -> None:
+        ctx = mp.get_context("spawn")
+        results = ctx.Queue()
+        proc = ctx.Process(
+            target=_solve_child, args=(self.problem, self.name_, self.heuristic, results), daemon=True
+        )
         try:
-            solver = make_solver(self.name_, self.heuristic)
-            actions = solver.solve(self.problem)
-            self.outcome = SolveOutcome(
-                self.name_, self.label, actions, solver.get_metrics()
-            )
-        except Exception as exc:  # hiện lỗi của solver lên GUI thay vì làm sập game
-            traceback.print_exc()
-            self.outcome = SolveOutcome(
-                self.name_, self.label, error=f"{type(exc).__name__}: {exc}"
-            )
+            proc.start()
+        except Exception as exc:
+            self._finish(error=f"could not start solver process: {exc}")
+            return
+        result = None
+        try:
+            # Đọc hàng đợi trong lúc chờ: tiến trình con chỉ thoát khi kết quả đã được lấy ra.
+            while result is None:
+                try:
+                    result = results.get(timeout=0.1)
+                    break
+                except queue.Empty:
+                    pass
+                if self._cancel.is_set():
+                    self._finish(cancelled=True)
+                    return
+                if not proc.is_alive():
+                    try:
+                        result = results.get(timeout=0.5)
+                    except queue.Empty:
+                        self._finish(error=f"solver process exited unexpectedly (code {proc.exitcode})")
+                        return
+        finally:
+            if proc.is_alive():
+                proc.terminate()
+            proc.join(2)
+        kind, payload, metrics = result
+        if kind == "ok":
+            self._finish(actions=payload, metrics=metrics)
+        else:
+            self._finish(error=payload)

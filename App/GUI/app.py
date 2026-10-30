@@ -377,10 +377,8 @@ class App:
 
     @property
     def current_theme(self) -> str:
-        th = getattr(self.settings, "theme", None)
-        if th in ("arctic", "desert"):
-            return th
-        return "arctic" if getattr(self.settings, "arctic_theme", False) else "arctic"
+        th = self.settings.theme
+        return th if th in ("arctic", "desert") else "arctic"
 
     def _rebuild_background(self):
         if self.current_theme == "desert":
@@ -391,7 +389,6 @@ class App:
 
     def set_theme(self, theme_name: str):
         self.settings.set("theme", theme_name)
-        self.settings.set("arctic_theme", (theme_name == "arctic"))
         if hasattr(self, "renderer"):
             self.renderer.set_theme(theme_name)
         if hasattr(self, "race") and self.race is not None:
@@ -406,9 +403,6 @@ class App:
         new_theme = "desert" if self.current_theme == "arctic" else "arctic"
         self.set_theme(new_theme)
         return new_theme
-
-    def _set_arctic_theme(self, on: bool):
-        self.set_theme("arctic" if on else "desert")
 
     def _set_sound(self, on: bool, toast: bool = True):
         self.audio.set_enabled(on)
@@ -433,7 +427,6 @@ class App:
             self.toast("Click Reset progress again to confirm", theme.BAD, 3.0)
 
     def save_screenshot(self):
-        SCREENSHOT_DIR = Path("screenshots")
         SCREENSHOT_DIR.mkdir(parents=True, exist_ok=True)
         path = SCREENSHOT_DIR / time.strftime("bloxorz_%Y%m%d_%H%M%S.png")
         try:
@@ -471,7 +464,7 @@ class App:
         self.paused = False
         self.used_solver = False
         self.lost_cells = None
-        self.job = None
+        self.cancel_solver(quiet=True)  # đổi màn: dừng tiến trình giải của màn cũ
         self.stats = None
         self.path_steps = []
         self.replay_done = []
@@ -835,6 +828,15 @@ class App:
         self.job = SolverJob(name, self.level.problem, self.heuristic if name == "A*" else None)
         self.job.start()
 
+    def cancel_solver(self, quiet: bool = False):
+        """Dừng lần giải đang chạy (nút Stop trong bảng AI, hoặc khi đổi màn)."""
+        job = getattr(self, "job", None)
+        self.job = None
+        if job is not None and not job.done:
+            job.cancel()
+            if not quiet:
+                self.toast(f"{job.label} stopped", theme.INFO, 2.0)
+
     def toggle_pause(self):
         self.paused = not self.paused
 
@@ -946,6 +948,8 @@ class App:
         if job.problem is not self.level.problem:  # đã đổi màn trong lúc giải
             return
         out = job.outcome
+        if out.cancelled:
+            return
         self.stats = out
         self.path_steps = path_steps(self.level.problem, out.actions) if out.found else []
         self.replay_done = []
@@ -1405,7 +1409,7 @@ class App:
             draw_text(surf, v, theme.font(15), theme.TEXT, (cam_card.x + 122, y))
 
     def _draw_toasts(self, surf):
-        y = 40
+        y = 100  # dưới thanh nút HUD (Undo / Restart / AI Solver / Pause) ở y 36-78
         for t in self.toasts:
             life = t["ttl"] - t["age"]
             a = int(255 * max(0.0, min(1.0, life / 0.4, t["age"] / 0.15)))
@@ -1819,8 +1823,6 @@ class App:
             self._draw_race(mouse)
             return
         surf = self.screen
-        surf.blit(self.bg, (0, 0))
-        self._draw_hud(surf)
 
         falling_anim = self.anims[0] if (self.anims and self.anims[0].kind == "fall") else None
         sink_anim = self.anims[0] if (self.anims and self.anims[0].kind == "sink") else None
@@ -1849,6 +1851,7 @@ class App:
                 force_p1 = None
                 exclude_p2 = None
 
+            surf.blit(self.bg, (0, 0))
             self.renderer.draw_board(surf, max_order=cut_order, force_include_cells=force_p1)
             self._draw_pieces(surf, static_filter=lambda s: self.renderer.iso.order(*s["cells"][0]) <= cut_order)
             self.renderer.draw_board(surf, min_order=cut_order, show_hints=False, exclude_cells=exclude_p2)
@@ -1864,6 +1867,7 @@ class App:
         elif sink_anim:
             goal = sink_anim.piece["cells"][0]
             cut_order = self.renderer.iso.order(*goal)
+            surf.blit(self.bg, (0, 0))
             self.renderer.draw_board(surf, max_order=cut_order, force_include_cells={goal})
             self._draw_pieces(surf)
             self.renderer.draw_board(surf, min_order=cut_order, show_hints=False, exclude_cells={goal})
@@ -1871,7 +1875,7 @@ class App:
             if self.settings.show_link_lines and self.link_segs:
                 self.renderer.draw_link_lines(surf, self.link_segs)
         else:
-            self.renderer.draw_board(surf)
+            self.renderer.draw_board(surf, background=self.bg)  # dán luôn nền + lớp bàn tĩnh
             self.renderer.draw_glows(surf)
             if self.settings.show_link_lines and self.link_segs:
                 self.renderer.draw_link_lines(surf, self.link_segs)
@@ -1880,6 +1884,7 @@ class App:
                 self.renderer.draw_path(surf, self.path_steps, done)
             self._draw_pieces(surf)
         self.renderer.draw_particles(surf)
+        self._draw_hud(surf)  # HUD vẽ sau bàn cờ để luôn nằm trên cùng
         self._draw_compass(surf)
         self._draw_toasts(surf)
         if self.show_ai_panel:

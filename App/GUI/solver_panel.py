@@ -105,6 +105,14 @@ class SolverDrawer:
 
         # Thẻ thông số Telemetry
         self.stats_box = pygame.Rect(x0, self.rect.y + 618, pw, self.h - 644)
+        # Nút dừng lần giải đang chạy (chỉ hiện khi đang tìm kiếm)
+        self.btn_stop = Button(
+            (self.stats_box.right - 124, self.stats_box.y + 22, 106, 40), "Stop",
+            lambda: self.app.cancel_solver(), font_size=16,
+        )
+
+    def _busy(self) -> bool:
+        return self.app.job is not None and not self.app.job.done
 
     def _close(self):
         self.app.show_ai_panel = False
@@ -174,8 +182,10 @@ class SolverDrawer:
                     self.heuristic_menu_open = False
                 return True
 
-        # 3. Nút đóng
+        # 3. Nút đóng / dừng
         if self.btn_close.handle(event, mouse):
+            return True
+        if self._busy() and self.btn_stop.handle(event, mouse):
             return True
 
         # 4. Các nút thuật toán
@@ -209,19 +219,21 @@ class SolverDrawer:
 
     def update(self, dt: float, mouse: Tuple[int, int]):
         """Cập nhật trạng thái hover và tính khả dụng của các nút."""
-        busy_job = self.app.job is not None and not self.app.job.done
+        busy_job = self._busy()
         avail = self.app.available
+        if busy_job:
+            self.btn_stop.update(dt, mouse)
 
         for name, b in self.solver_buttons.items():
-            b.enabled = (not busy_job) and avail
+            b.enabled = (not busy_job) and avail.get(name, False)
             b.update(dt, mouse)
 
         self.btn_heuristic.label = f"Heuristic: {self._heuristic_label()}  [v]"
-        self.btn_heuristic.enabled = self.show_heuristic_button and (not busy_job) and avail
+        self.btn_heuristic.enabled = self.show_heuristic_button and (not busy_job) and avail.get("A*", False)
         if self.show_heuristic_button:
             self.btn_heuristic.update(dt, mouse)
 
-        self.btn_compare.enabled = (not busy_job) and avail
+        self.btn_compare.enabled = (not busy_job) and any(avail.values())
         self.btn_compare.update(dt, mouse)
         self.btn_close.update(dt, mouse)
 
@@ -326,7 +338,8 @@ class SolverDrawer:
                     (int(c[0] + 13 * math.cos(a)), int(c[1] + 13 * math.sin(a))), 3,
                 )
             draw_text(surf, f"{job.label} searching...", theme.font(20, True), theme.TEXT, (box.x + 64, box.y + 26))
-            draw_text(surf, "Exploring state space in real-time...", theme.font(14), theme.TEXT_DIM, (box.x + 64, box.y + 52))
+            draw_text(surf, f"{job.elapsed:.1f} s  -  runs in its own process", theme.font(14), theme.TEXT_DIM, (box.x + 64, box.y + 52))
+            self.btn_stop.draw(surf)
         elif stats is None:
             draw_text(surf, "Algorithm Lab Briefing", theme.font(18, True), (245, 252, 255), (box.x + 18, box.y + 16))
             pygame.draw.line(surf, (70, 45, 55) if is_desert else (40, 65, 100), (box.x + 16, box.y + 44), (box.right - 16, box.y + 44), 1)

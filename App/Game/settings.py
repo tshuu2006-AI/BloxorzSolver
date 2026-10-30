@@ -22,7 +22,6 @@ DEFAULTS: Dict[str, Any] = {
     "sound_on": True,           # hiệu ứng âm thanh (phím M để tắt/bật)
     "volume": 0.6,
     "tips_seen": [],
-    "arctic_theme": False,      # Theme Bắc Cực: Khối băng chứa chim cánh cụt, sàn tuyết, cầu gỗ
     "theme": "arctic",          # Theme hiện tại: "arctic" (Bắc Cực) hoặc "desert" (Sa Mạc)
 }
 
