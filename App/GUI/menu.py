@@ -18,15 +18,14 @@ from __future__ import annotations
 
 import math
 import random
-import time
-from typing import Callable, Dict, List, Optional, Tuple
+from typing import List, Tuple
 
 import pygame
 import pygame.gfxdraw as gfx
 
 from App.GUI import theme
-from App.GUI.models import INITIAL_FRAME, get_penguin_mesh, get_cactus_mesh
-from App.GUI.render import Camera, poly, smoothstep
+from App.GUI.models import get_cactus_mesh
+from App.GUI.render import poly
 from App.GUI.widgets import draw_text, rrect
 
 

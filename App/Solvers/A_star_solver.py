@@ -4,15 +4,16 @@ Heuristics return estimates in cost units.  The project's roll cost is at least
 1, and a roll moves a block by at most two grid cells in one axis.
 """
 
-from typing import Dict, Tuple, Type
+from typing import Dict, Type
+
+from App.Components.node import Node
+from App.Solvers.base_solver import BestFirstSearchSolver
 from App.Solvers.heuristics import (
     BaseHeuristic,
     ManhattanHeuristic,
     ModifiedManhattanHeuristic,
     RelaxedConfigurationHeuristic,
 )
-from App.Components.node import Node
-from App.Solvers.base_solver import BestFirstSearchSolver
 
 HEURISTICS: Dict[str, Type[BaseHeuristic]] = {
     "manhattan": ManhattanHeuristic,

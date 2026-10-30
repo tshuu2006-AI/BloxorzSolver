@@ -5,8 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools import benchmark
 from App.Components.level_loader import load_level
+from tools import benchmark
 
 LEVELS = Path(benchmark.LEVELS_DIR)
 

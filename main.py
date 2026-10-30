@@ -2,7 +2,6 @@
 
 import argparse
 import sys
-import time
 
 # Đảm bảo in tiếng Việt chuẩn trên Terminal Windows
 if hasattr(sys.stdout, "reconfigure"):

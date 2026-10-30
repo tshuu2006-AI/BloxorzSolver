@@ -18,7 +18,7 @@ import pygame.gfxdraw as gfx
 
 from App.Components.features import SwitchType, TileType
 from App.GUI import theme
-from App.GUI.models import Frame3D, INITIAL_FRAME, frame_for_orientation, get_penguin_mesh, get_cactus_mesh
+from App.GUI.models import Frame3D, INITIAL_FRAME, get_penguin_mesh, get_cactus_mesh
 from App.GUI.theme import mix, shade
 
 Cell = Tuple[int, int]

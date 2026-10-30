@@ -5,14 +5,14 @@ switch, or a roll that changes bridge state). All estimates below are therefore
 expressed in units of that minimum cost.
 """
 
-from abc import ABC, abstractmethod
 import heapq
+from abc import ABC, abstractmethod
 from itertools import combinations
 from typing import Dict, Iterable, List, Tuple
 
 from App.Components import Problem, State
-from App.Components.state import Orientation
 from App.Components.features import SwitchType, TileType
+from App.Components.state import Orientation
 
 Coordinate = Tuple[int, int]
 

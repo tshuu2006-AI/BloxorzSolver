@@ -12,10 +12,9 @@ Thiết kế chuẩn Indie Game:
 from __future__ import annotations
 
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 import pygame
-from pygame import gfxdraw as gfx
 
 from App.GUI import theme
 from App.GUI.widgets import Button, Slider, draw_text, rrect, wrap_text
@@ -71,6 +70,7 @@ class SolverDrawer:
             )
 
         # Nút chọn Heuristic cho A*
+        self.show_heuristic_button = False
         self.heuristic_menu_open = False
         self.btn_heuristic = Button(
             (x0, self.rect.y + 328, pw, 38),
@@ -100,8 +100,8 @@ class SolverDrawer:
         self.btn_step_fwd = Button((x0 + (bw_s + gap) * 2 + bw_pp + gap, ry, bw_s, 40), ">", lambda: self.app._request_step(1), tooltip="Step fwd (.)", font_size=18)
         self.btn_path = Button((x0 + pw - bw_path, ry, bw_path, 40), "Path: ON", self.app.toggle_path, tooltip="Toggle path (V)", font_size=14)
 
-        # Thanh trượt tốc độ replay (không đặt label trong widget để tránh va chạm text)
-        self.slider = Slider((x0, self.rect.y + 558, pw, 18), 0.5, 4.0, self.app.speed, label="")
+        # Slider renders its label and value on one line above the track.
+        self.slider = Slider((x0, self.rect.y + 558, pw, 18), 0.5, 4.0, self.app.speed, label="Replay Speed", fmt="{:.2f}x")
 
         # Thẻ thông số Telemetry
         self.stats_box = pygame.Rect(x0, self.rect.y + 618, pw, self.h - 644)
@@ -109,12 +109,16 @@ class SolverDrawer:
     def _close(self):
         self.app.show_ai_panel = False
         self.heuristic_menu_open = False
+        self.show_heuristic_button = False
         self.app.audio.play("switch")
 
     def _on_solver_click(self, name: str):
         if name == "A*":
-            self.app.start_solver("A*")
+            # Reveal A*'s heuristic control only after A* is selected.
+            self.show_heuristic_button = True
+            self.heuristic_menu_open = False
         else:
+            self.show_heuristic_button = False
             self.heuristic_menu_open = False
             self.app.start_solver(name)
 
@@ -160,8 +164,10 @@ class SolverDrawer:
                     if r.collidepoint(mouse):
                         self.app.set_heuristic(opt)
                         self.heuristic_menu_open = False
+                        self.show_heuristic_button = False
                         self.btn_heuristic.label = f"Heuristic: {self._heuristic_label()}  [v]"
                         self.app.audio.play("switch")
+                        self.app.start_solver("A*")
                         clicked_opt = True
                         break
                 if not clicked_opt and not self.btn_heuristic.rect.collidepoint(mouse):
@@ -173,7 +179,7 @@ class SolverDrawer:
             return True
 
         # 4. Các nút thuật toán
-        if self.btn_heuristic.handle(event, mouse):
+        if self.show_heuristic_button and self.btn_heuristic.handle(event, mouse):
             return True
 
         for b in self.solver_buttons.values():
@@ -211,8 +217,9 @@ class SolverDrawer:
             b.update(dt, mouse)
 
         self.btn_heuristic.label = f"Heuristic: {self._heuristic_label()}  [v]"
-        self.btn_heuristic.enabled = (not busy_job) and avail
-        self.btn_heuristic.update(dt, mouse)
+        self.btn_heuristic.enabled = self.show_heuristic_button and (not busy_job) and avail
+        if self.show_heuristic_button:
+            self.btn_heuristic.update(dt, mouse)
 
         self.btn_compare.enabled = (not busy_job) and avail
         self.btn_compare.update(dt, mouse)
@@ -273,7 +280,8 @@ class SolverDrawer:
         draw_text(surf, "SELECT SEARCH ALGORITHM", theme.font(13, True), accent_title, (x0, self.rect.y + 164))
         for b in self.solver_buttons.values():
             b.draw(surf)
-        self.btn_heuristic.draw(surf)
+        if self.show_heuristic_button:
+            self.btn_heuristic.draw(surf)
         self.btn_compare.draw(surf)
 
         # 6. Khu vực Replay & tua bước
@@ -294,9 +302,7 @@ class SolverDrawer:
             if prog_w > 0:
                 rrect(surf, (x0, self.rect.y + 520, prog_w, 6), accent_title, radius=3)
 
-        # Thanh trượt tốc độ replay với label riêng biệt, rõ ràng
-        draw_text(surf, "Replay Speed", theme.font(13, True), (180, 205, 230), (x0, self.rect.y + 538))
-        draw_text(surf, f"{self.app.speed:.2f}x", theme.mono(14, True), accent_title, (x0 + w, self.rect.y + 538), "topright")
+        # Replay speed label and value are rendered by the slider without overlap.
         self.slider.draw(surf)
 
         # 7. Khu vực Telemetry & Số liệu

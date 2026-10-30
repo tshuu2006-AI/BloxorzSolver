@@ -4,9 +4,10 @@ import time
 import tracemalloc
 from collections import deque
 from typing import Optional, List
-from App.Solvers.base_solver import BaseSolver
+
 from App.Components.node import Node
 from App.Components.problem import Problem
+from App.Solvers.base_solver import BaseSolver
 
 
 class BFSSolver(BaseSolver):

@@ -25,15 +25,14 @@ from App.GUI import theme
 from App.GUI.audio import Audio
 from App.GUI.compare_view import CompareView
 from App.GUI.menu import MainMenu, PauseMenu, LevelSelectView, SettingsView, WinOverlay
-from App.GUI.solver_panel import SolverDrawer
 from App.GUI.models import INITIAL_FRAME, frame_for_orientation, roll_frame
 from App.GUI.pieces import pieces_of
 from App.GUI.race import LANE_COLORS, Race
-from App.GUI.render import BoardRenderer, Camera, piece_box, smoothstep
+from App.GUI.render import BoardRenderer, Camera, smoothstep
+from App.GUI.solver_panel import SolverDrawer
 from App.GUI.widgets import (
     Button,
     Slider,
-    Toggle,
     draw_text,
     rrect,
     vgradient,
@@ -47,7 +46,6 @@ from App.Game.progress import Progress
 from App.Game.session import DELTAS, GameSession, Outcome, Status, fired_switches
 from App.Game.settings import Settings
 from App.Game.solver_bridge import (
-    SOLVER_ORDER,
     SolveOutcome,
     SolverJob,
     available_heuristics,

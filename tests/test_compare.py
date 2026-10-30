@@ -1,7 +1,5 @@
 """compare.py: chạy lần lượt nhiều solver trên một màn và đánh dấu giá trị tốt nhất."""
 
-import threading
-import time
 import unittest
 from pathlib import Path
 
