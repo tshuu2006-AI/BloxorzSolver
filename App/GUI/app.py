@@ -41,7 +41,8 @@ from App.GUI.widgets import (
 from App.Game.compare import CompareJob
 from App.Game.experiment import compare_configs, write_csv
 from App.Game.links import link_segments
-from App.Game.path import path_steps
+from App.Components.problem import Problem
+from App.Game.path import compute_step_guide, path_steps, replay_states
 from App.Game.progress import Progress
 from App.Game.session import DELTAS, GameSession, Outcome, Status, fired_switches
 from App.Game.settings import Settings
@@ -50,6 +51,7 @@ from App.Game.solver_bridge import (
     SolverJob,
     available_heuristics,
     available_solvers,
+    make_solver,
 )
 from App.Game.tips import TIPS, tip_for
 
@@ -226,6 +228,11 @@ class App:
         self.race: Optional[Race] = None
         self.race_paused = False
         self.show_path = self.settings.show_path
+        self.show_step_guide = self.settings.get("show_step_guide", False)
+        self.selected_solver: Optional[str] = None
+        self.guide_solution: Optional[List[str]] = None
+        self.guide_states: Optional[List[Any]] = None
+        self.next_step_info: Optional[dict] = None
         self.tip: Optional[str] = None  # khoá gợi ý đang hiện
         self.tip_start_moves = 0
         self._tip_pending = True
@@ -468,6 +475,10 @@ class App:
         self.stats = None
         self.path_steps = []
         self.replay_done = []
+        self.selected_solver = None
+        self.guide_solution = None
+        self.guide_states = None
+        self.next_step_info = None
         self.link_segs = link_segments(self.level)
         self.tip = None
         self._tip_pending = True
@@ -482,6 +493,12 @@ class App:
     def restart(self):
         self._reset_play()
         self.session.reset()
+        self.selected_solver = None
+        self.show_step_guide = False
+        self.guide_solution = None
+        self.guide_states = None
+        self.next_step_info = None
+        self.path_steps = []
         self.block_frame = frame_for_orientation(self.level.problem.initial_state.orientation)
         self.cube_frames = [INITIAL_FRAME, INITIAL_FRAME]
         self.frame_history.clear()
@@ -537,6 +554,7 @@ class App:
                 self.lost_cells = None
                 self.renderer.set_bridges(self.session.state.bridges_state)
                 self.renderer.clear_fragile_falls()
+                self._recalculate_guide_from_current()
             return
 
         entry = self.action_history.pop()
@@ -553,6 +571,8 @@ class App:
             self.renderer.set_bridges(prev_st.bridges_state)
             self.renderer.clear_fragile_falls()
             self.audio.play("swap")
+            self.is_action_from_replay = False
+            self._on_player_moved()
             return
 
         rev_act = {"U": "D", "D": "U", "L": "R", "R": "L"}.get(act, "D")
@@ -578,6 +598,8 @@ class App:
             self.renderer.clear_fragile_falls()
             self.lost_cells = None
             self.audio.play("roll")
+            self.is_action_from_replay = False
+            self._on_player_moved()
 
         self.anims.append(RollAnim(moving, direction, statics=statics, on_finish=after_undo_roll))
 
@@ -603,9 +625,12 @@ class App:
             if not from_replay:
                 self.queued = action
             return None
+        self.is_action_from_replay = from_replay
         if not from_replay:
-            self.replay.clear()  # người chơi can thiệp: dừng replay
-            self.replay_done.clear()
+            self.paused = True  # người chơi can thiệp: tạm dừng auto replay
+            if not self.selected_solver:
+                self.replay.clear()
+                self.replay_done.clear()
         saved_block_frame = self.block_frame
         saved_cube_frames = list(self.cube_frames)
         prev_st = self.session.state
@@ -621,6 +646,8 @@ class App:
                 "cube_frames": saved_cube_frames,
             })
         self._present(ev)
+        if ev.outcome == Outcome.SWITCHED:
+            self._on_player_moved()
         return ev
 
     def _present(self, ev):
@@ -823,9 +850,17 @@ class App:
     def start_solver(self, name: str):
         if self.job is not None and not self.job.done:
             return
-        self.restart()
+        self.selected_solver = name
         self.stats = None
-        self.job = SolverJob(name, self.level.problem, self.heuristic if name == "A*" else None)
+        # Giải bài toán bắt đầu từ vị trí hiện tại thay vì reset về đầu màn
+        current_problem = Problem(
+            grid=self.level.problem.grid,
+            goal_pos=self.level.problem.goal_pos,
+            initial_state=self.session.state,
+            bridge_indices=self.level.problem.bridge_indices,
+            switches=self.level.problem.switches,
+        )
+        self.job = SolverJob(name, current_problem, self.heuristic if name == "A*" else None)
         self.job.start()
 
     def cancel_solver(self, quiet: bool = False):
@@ -843,6 +878,98 @@ class App:
     def toggle_path(self):
         self.show_path = not self.show_path
         self.settings.set("show_path", self.show_path)
+
+    def toggle_step_guide(self):
+        if self.selected_solver is None:
+            self.toast("Please select an algorithm first (TAB)", theme.BAD, 2.0)
+            return
+        self.show_step_guide = not self.show_step_guide
+        self.settings.set("show_step_guide", self.show_step_guide)
+        if self.show_step_guide:
+            self._update_step_guide()
+        self.toast("Step Guide: ON" if self.show_step_guide else "Step Guide: OFF", theme.INFO, 1.8)
+
+    def _update_step_guide(self):
+        if self.session.status != Status.PLAYING or not self.selected_solver:
+            self.next_step_info = None
+            return
+
+        st = self.session.state
+        if self.guide_states and len(self.guide_states) > 1 and self.guide_states[0] == st and self.guide_solution:
+            act = self.guide_solution[0]
+            nxt = self.guide_states[1]
+            self.next_step_info = {"action": act, "next_state": nxt}
+            return
+
+        res = compute_step_guide(
+            self.level.problem,
+            st,
+            self.guide_solution,
+            self.guide_states,
+            solver_name=self.selected_solver,
+            heuristic=self.heuristic if self.selected_solver == "A*" else None,
+        )
+        if res:
+            self.guide_solution = res["solution"]
+            self.guide_states = res["states"]
+            self.next_step_info = {"action": res["action"], "next_state": res["next_state"]}
+        else:
+            self.next_step_info = None
+
+    def _recalculate_guide_from_current(self):
+        """Tính lại Step Guide và Path từ ô hiện tại theo thuật giải user đang chọn khi lỡ đi sai ô."""
+        if not self.selected_solver or self.session.status != Status.PLAYING:
+            return
+        st = self.session.state
+        sub_problem = Problem(
+            grid=self.level.problem.grid,
+            goal_pos=self.level.problem.goal_pos,
+            initial_state=st,
+            bridge_indices=self.level.problem.bridge_indices,
+            switches=self.level.problem.switches,
+        )
+        try:
+            solver = make_solver(self.selected_solver, self.heuristic if self.selected_solver == "A*" else None)
+            actions = solver.solve(sub_problem)
+            if actions is not None:
+                self.guide_solution = actions
+                self.guide_states = replay_states(sub_problem, actions)
+                self.path_steps = path_steps(sub_problem, actions)
+                self.replay = deque(actions)
+                self.replay_done = []
+                self.replay_total = len(actions)
+                self._update_step_guide()
+            else:
+                self.guide_solution = None
+                self.guide_states = None
+                self.path_steps = []
+                self.next_step_info = None
+        except Exception:
+            traceback.print_exc()
+
+    def _on_player_moved(self):
+        """Khi người chơi hoặc auto-replay vừa hoàn thành một bước lăn trên bàn cờ."""
+        if not self.selected_solver or self.session.status != Status.PLAYING:
+            return
+        from_replay = getattr(self, "is_action_from_replay", False)
+        st = self.session.state
+        if self.guide_solution and self.guide_states:
+            if len(self.guide_states) > 0 and st == self.guide_states[0]:
+                self._update_step_guide()
+                return
+            if len(self.guide_states) > 1 and st == self.guide_states[1]:
+                # Đúng ô theo lộ trình! Tiến lên 1 bước:
+                act_done = self.guide_solution[0] if self.guide_solution else None
+                if not from_replay and self.replay:
+                    self.replay_done.append(self.replay.popleft())
+                self.guide_solution = self.guide_solution[1:]
+                self.guide_states = self.guide_states[1:]
+                self._update_step_guide()
+                return
+        if from_replay:
+            return
+        # Lỡ đi sai ô hoặc chệch lộ trình: tính lại từ ô hiện tại theo thuật giải đang chọn!
+        self._recalculate_guide_from_current()
 
     def _request_step(self, direction: int):
         self.step_req = direction
@@ -917,15 +1044,19 @@ class App:
         self.stats = out
         self._begin_replay(out.label, out.actions)
 
-    def _begin_replay(self, label: str, actions: List[str]):
-        self.path_steps = path_steps(self.level.problem, actions)
+    def _begin_replay(self, label: str, actions: List[str], problem: Optional[Problem] = None):
+        pb = problem or self.level.problem
+        self.path_steps = path_steps(pb, actions)
         self.replay_done = []
         self.replay = deque(actions)
         self.used_solver = True
         self.replay_total = len(actions)
         self.replay_label = label
         self.replay_timer = 0.5
-        self.paused = False
+        self.paused = True  # Mặc định là PAUSE, không tự chạy luôn!
+        self.guide_solution = list(actions)
+        self.guide_states = replay_states(pb, actions)
+        self._update_step_guide()
 
     def _save_compare_csv(self):
         data = self._compare_data()
@@ -945,21 +1076,22 @@ class App:
         if job is None or not job.done:
             return
         self.job = None
-        if job.problem is not self.level.problem:  # đã đổi màn trong lúc giải
+        if job.problem.grid is not self.level.problem.grid or job.problem.goal_pos != self.level.problem.goal_pos:
             return
         out = job.outcome
         if out.cancelled:
             return
         self.stats = out
-        self.path_steps = path_steps(self.level.problem, out.actions) if out.found else []
+        sub_problem = job.problem
+        self.path_steps = path_steps(sub_problem, out.actions) if out.found else []
         self.replay_done = []
         if out.error:
             self.toast(f"{job.label} failed: {out.error}", theme.BAD, 5.0)
         elif not out.found:
             self.toast(f"{job.label}: no solution found", theme.BAD, 4.0)
         else:
-            self._begin_replay(job.label, out.actions)
-            self.toast(f"{job.label}: replaying {len(out.actions)} actions", theme.INFO, 3.0)
+            self._begin_replay(job.label, out.actions, problem=sub_problem)
+            self.toast(f"{job.label}: found {len(out.actions)} actions (Paused)", theme.INFO, 3.0)
 
     def _step_replay(self, dt: float):
         if not self.replay or self.paused or self.anims:
@@ -1135,6 +1267,8 @@ class App:
             self.toggle_pause()
         elif k == pygame.K_v:
             self.toggle_path()
+        elif k in (pygame.K_b, pygame.K_h):
+            self.toggle_step_guide()
         elif k == pygame.K_PERIOD:
             self._request_step(1)
         elif k == pygame.K_COMMA:
@@ -1239,6 +1373,8 @@ class App:
                 self.anims.popleft()
                 if anim.on_finish:
                     anim.on_finish()
+                if not self.anims and not self.queued:
+                    self._on_player_moved()
         elif self.queued:
             action, self.queued = self.queued, None
             self.do_action(action)
@@ -1374,6 +1510,8 @@ class App:
         for key, label in labels.items():
             dx, dy = self.renderer.screen_dir(key)
             hot = self.key_flash[key]
+            if self.show_step_guide and self.next_step_info and self.next_step_info.get("action") == key:
+                hot = max(hot, 0.70 + 0.30 * math.sin(self.renderer.time * 5.0))
             col = theme.mix(theme.TEXT_DIM, theme.ACCENT, min(1.0, 0.45 + hot))
             tip = (cx + dx * 46, cy + dy * 46)
             pygame.draw.line(surf, col, (cx, cy), tip, 4)
@@ -1491,6 +1629,8 @@ class App:
             self.restart_race()
         elif k == pygame.K_v:
             self.toggle_path()
+        elif k in (pygame.K_b, pygame.K_h):
+            self.toggle_step_guide()
         elif k == pygame.K_ESCAPE:
             self.exit_race()
 
@@ -1883,6 +2023,13 @@ class App:
                 done = len(self.replay_done) if (self.replay or self.replay_done) else None
                 self.renderer.draw_path(surf, self.path_steps, done)
             self._draw_pieces(surf)
+            if self.show_step_guide and self.next_step_info and self.session.status == Status.PLAYING and not self.anims:
+                self.renderer.draw_ghost_step(
+                    surf,
+                    self.next_step_info["next_state"],
+                    action=self.next_step_info.get("action"),
+                    current_state=self.session.state,
+                )
         self.renderer.draw_particles(surf)
         self._draw_hud(surf)  # HUD vẽ sau bàn cờ để luôn nằm trên cùng
         self._draw_compass(surf)

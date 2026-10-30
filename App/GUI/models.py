@@ -231,8 +231,18 @@ def normalize_obj_to_box(
 def build_fallback_penguin(
     is_cube: bool = False,
 ) -> Tuple[List[Tuple[float, float, float]], List[List[int]], List[Tuple[int, int, int]]]:
-    """Tạo mô hình 3D low-poly chim cánh cụt tích hợp sẵn, CĂN GIỮA TẠI (0, 0, 0)."""
-    scale = 0.5 if is_cube else 1.0
+    """Tạo mô hình 3D low-poly chim cánh cụt hoàn chỉnh (thân, đầu tròn, mắt, má, mỏ 3D, cánh, chân).
+    Căn giữa tại (0, 0, 0), xoay tự do theo Frame3D.
+    - Chân cam vững chắc ở đáy.
+    - Thân mập mạp với bụng trắng tuyết phía trước, lông xanh đen sẫm phía sau.
+    - Cổ thon nhẹ kết nối thân và đầu mượt mà.
+    - Đầu tròn đầy đặn (không bị cụt/mất đầu), má trắng.
+    - Đôi mắt to tròn hoạt hình với con ngươi đen và đốm sáng long lanh.
+    - Má hồng baby dễ thương.
+    - Mỏ nhọn 3D màu cam chĩa về phía trước (+R), pháp tuyến chuẩn không bị culling.
+    - Hai cánh 3D hai mặt hai bên sườn.
+    """
+    scale = 0.52 if is_cube else 1.0
     verts: List[Tuple[float, float, float]] = []
     faces: List[List[int]] = []
     colors: List[Tuple[int, int, int]] = []
@@ -251,74 +261,186 @@ def build_fallback_penguin(
         ]
         verts.extend(box_pts)
         for f in [
-            [idx, idx + 1, idx + 2, idx + 3],
-            [idx + 4, idx + 7, idx + 6, idx + 5],
-            [idx, idx + 4, idx + 5, idx + 1],
-            [idx + 1, idx + 5, idx + 6, idx + 2],
-            [idx + 2, idx + 6, idx + 7, idx + 3],
-            [idx + 3, idx + 7, idx + 4, idx],
+            [idx, idx + 1, idx + 2, idx + 3],          # đáy (-Z)
+            [idx + 4, idx + 7, idx + 6, idx + 5],      # đỉnh (+Z)
+            [idx, idx + 4, idx + 5, idx + 1],          # mặt sau (-R)
+            [idx + 1, idx + 5, idx + 6, idx + 2],      # mặt phải (+C)
+            [idx + 2, idx + 6, idx + 7, idx + 3],      # mặt trước (+R)
+            [idx + 3, idx + 7, idx + 4, idx],          # mặt trái (-C)
         ]:
             faces.append(f)
             colors.append(col)
 
-    # 1. Bàn chân cam ở đáy (z từ -0.85 đến -0.73)
-    add_box(0.05, 0.32, -0.28, -0.06, -0.85, -0.73, (245, 130, 20))
-    add_box(0.05, 0.32, 0.06, 0.28, -0.85, -0.73, (245, 130, 20))
+    # 1. Bàn chân cam vững chãi ở đáy (z từ -0.86 đến -0.73)
+    col_foot = (245, 125, 20)
+    add_box(0.04, 0.36, -0.28, -0.06, -0.86, -0.73, col_foot)
+    add_box(0.04, 0.36, 0.06, 0.28, -0.86, -0.73, col_foot)
 
-    # 2. Thân chim (các tầng elip từ z = -0.70 đến z = +0.80)
-    n = 8
-    rings = [
-        (-0.70, 0.22, 0.22),  # đáy thân
-        (-0.35, 0.34, 0.32),  # bụng dưới
-        (+0.10, 0.35, 0.31),  # ngực
-        (+0.48, 0.25, 0.23),  # cổ
-        (+0.80, 0.18, 0.18),  # đỉnh đầu
+    # 2. Thân & Đầu theo các tầng tròn (N = 10 cạnh quanh thân)
+    N = 10
+    tiers = [
+        (-0.72, 0.23, 0.23),  # Đáy thân
+        (-0.45, 0.34, 0.33),  # Bụng dưới mập
+        (-0.12, 0.36, 0.34),  # Bụng ngực lớn nhất
+        (+0.20, 0.30, 0.29),  # Ngực trên / vai
+        (+0.42, 0.23, 0.23),  # Cổ thon nhẹ
+        (+0.56, 0.27, 0.27),  # Cằm / má nở to
+        (+0.70, 0.27, 0.27),  # Đầu ngang mắt mỏ
+        (+0.82, 0.22, 0.22),  # Trán trên
+        (+0.88, 0.13, 0.13),  # Đỉnh đầu vát tròn
     ]
 
-    ring_start_indices = []
-    for z_pos, rad_r, rad_c in rings:
-        ring_start_indices.append(len(verts))
-        for i in range(n):
-            ang = i * math.tau / n
+    tier_start_indices = []
+    for z_pos, rad_r, rad_c in tiers:
+        tier_start_indices.append(len(verts))
+        for i in range(N):
+            ang = i * math.tau / N
             r = rad_r * math.cos(ang)
             c = rad_c * math.sin(ang)
             verts.append((r * scale, c * scale, z_pos * scale))
 
-    for layer in range(len(rings) - 1):
-        idx_a = ring_start_indices[layer]
-        idx_b = ring_start_indices[layer + 1]
-        for i in range(n):
-            next_i = (i + 1) % n
+    col_white = (248, 250, 255)
+    col_navy = (22, 28, 44)
+
+    for layer in range(len(tiers) - 1):
+        idx_a = tier_start_indices[layer]
+        idx_b = tier_start_indices[layer + 1]
+        for i in range(N):
+            next_i = (i + 1) % N
             quad = [idx_a + i, idx_a + next_i, idx_b + next_i, idx_b + i]
             faces.append(quad)
-            ang = i * math.tau / n
-            is_front = math.cos(ang) > 0.1
-            if is_front and layer in (0, 1, 2):
-                colors.append((248, 250, 254))  # bụng trắng
+            ang = (i + 0.5) * math.tau / N
+            cos_a = math.cos(ang)
+
+            if layer <= 3:
+                # Thân & ngực: bụng trắng tuyết phía trước
+                if cos_a > 0.05:
+                    colors.append(col_white)
+                else:
+                    colors.append(col_navy)
+            elif layer in (4, 5):
+                # Vùng mặt / đầu: má trắng phía trước, mảng đầu và sau gáy màu đen
+                if cos_a > 0.15:
+                    colors.append(col_white)
+                else:
+                    colors.append(col_navy)
             else:
-                colors.append((26, 34, 50))  # lưng đen xanh
+                # Đỉnh đầu & trán: màu đen
+                colors.append(col_navy)
 
-    head_top = ring_start_indices[-1]
-    faces.append([head_top + i for i in range(n)])
-    colors.append((26, 34, 50))
+    # Đỉnh chóp đầu (hình chóp tròn mịn lên đỉnh apex)
+    apex_idx = len(verts)
+    verts.append((0.0, 0.0, 0.90 * scale))
+    top_ring = tier_start_indices[-1]
+    for i in range(N):
+        next_i = (i + 1) % N
+        faces.append([top_ring + i, top_ring + next_i, apex_idx])
+        colors.append(col_navy)
 
-    # 3. Mỏ cam
-    beak_tip = len(verts)
-    verts.append((0.44 * scale, 0.0, 0.55 * scale))
-    idx_head = ring_start_indices[3]
-    faces.append([idx_head, idx_head + 1, beak_tip])
-    colors.append((255, 145, 15))
-    faces.append([idx_head, beak_tip, idx_head + n - 1])
-    colors.append((255, 145, 15))
+    # Đáy thân phẳng
+    bot_ring = tier_start_indices[0]
+    bot_face = [bot_ring + i for i in reversed(range(N))]
+    faces.append(bot_face)
+    colors.append(col_navy)
 
-    # 4. Hai cánh
+    # 3. Đôi mắt to hoạt hình biểu cảm ở mặt trước
+    col_pupil = (18, 20, 26)
+    col_blush = (255, 155, 170)
+    eye_z = 0.69 * scale
+    eye_r = 0.278 * scale
+
     for sign in (-1, 1):
-        w_idx = len(verts)
-        verts.append((0.0, sign * 0.33 * scale, 0.35 * scale))
-        verts.append((0.0, sign * 0.38 * scale, -0.25 * scale))
-        verts.append((-0.18 * scale, sign * 0.32 * scale, 0.05 * scale))
-        faces.append([w_idx, w_idx + 1, w_idx + 2])
-        colors.append((22, 28, 42))
+        eye_c = sign * 0.115 * scale
+
+        # Tròng trắng mắt
+        w_start = len(verts)
+        eye_rad = 0.058 * scale
+        for k in range(6):
+            ang = k * math.tau / 6
+            c_off = eye_rad * math.sin(ang)
+            z_off = eye_rad * math.cos(ang)
+            verts.append((eye_r, eye_c + c_off, eye_z + z_off))
+        faces.append([w_start + k for k in reversed(range(6))])
+        colors.append((255, 255, 255))
+
+        # Con ngươi đen
+        p_start = len(verts)
+        p_r = 0.282 * scale
+        p_rad = 0.035 * scale
+        for k in range(5):
+            ang = k * math.tau / 5
+            c_off = p_rad * math.sin(ang)
+            z_off = p_rad * math.cos(ang)
+            verts.append((p_r, eye_c + (sign * 0.008 * scale) + c_off, eye_z + z_off))
+        faces.append([p_start + k for k in reversed(range(5))])
+        colors.append(col_pupil)
+
+        # Chấm sáng long lanh trong mắt
+        glint_start = len(verts)
+        g_r = 0.284 * scale
+        g_rad = 0.012 * scale
+        for k in range(4):
+            ang = k * math.tau / 4
+            c_off = g_rad * math.sin(ang)
+            z_off = g_rad * math.cos(ang)
+            verts.append((g_r, eye_c + 0.012 * scale + c_off, eye_z + 0.016 * scale + z_off))
+        faces.append([glint_start + k for k in reversed(range(4))])
+        colors.append((255, 255, 255))
+
+        # Má hồng dễ thương
+        blush_start = len(verts)
+        bl_r = 0.275 * scale
+        bl_c = sign * 0.165 * scale
+        bl_z = 0.58 * scale
+        for k in range(4):
+            ang = k * math.tau / 4
+            c_off = 0.035 * scale * math.sin(ang)
+            z_off = 0.022 * scale * math.cos(ang)
+            verts.append((bl_r, bl_c + c_off, bl_z + z_off))
+        faces.append([blush_start + k for k in reversed(range(4))])
+        colors.append(col_blush)
+
+    # 4. Mỏ cam 3D hoàn chỉnh hình kim tự tháp 4 mặt
+    beak_start = len(verts)
+    col_beak_top = (255, 140, 0)
+    col_beak_bot = (235, 110, 0)
+    # 4 đỉnh đế mỏ gắn trên mặt
+    b_base_top = (0.280 * scale, 0.0, 0.68 * scale)
+    b_base_left = (0.276 * scale, -0.065 * scale, 0.61 * scale)
+    b_base_right = (0.276 * scale, 0.065 * scale, 0.61 * scale)
+    b_base_bot = (0.280 * scale, 0.0, 0.54 * scale)
+    # Đỉnh nhọn chĩa ra trước
+    b_tip = (0.46 * scale, 0.0, 0.60 * scale)
+    verts.extend([b_base_top, b_base_left, b_base_right, b_base_bot, b_tip])
+
+    # 4 mặt mỏ (thứ tự đỉnh xoay ngược chiều kim đồng hồ nhìn từ ngoài vào để pháp tuyến hướng ra ngoài)
+    faces.append([beak_start, beak_start + 4, beak_start + 2])  # trên phải
+    colors.append(col_beak_top)
+    faces.append([beak_start, beak_start + 1, beak_start + 4])  # trên trái
+    colors.append(col_beak_top)
+    faces.append([beak_start + 3, beak_start + 2, beak_start + 4])  # dưới phải
+    colors.append(col_beak_bot)
+    faces.append([beak_start + 3, beak_start + 4, beak_start + 1])  # dưới trái
+    colors.append(col_beak_bot)
+
+    # 5. Hai cánh 3D (dày, 2 mặt để nhìn từ góc nào cũng không bị culling)
+    for sign in (-1, 1):
+        w_start = len(verts)
+        p_sh_top = (0.05 * scale, sign * 0.30 * scale, 0.28 * scale)
+        p_sh_back = (-0.12 * scale, sign * 0.27 * scale, 0.24 * scale)
+        p_tip = (-0.04 * scale, sign * 0.36 * scale, -0.28 * scale)
+        p_mid = (0.08 * scale, sign * 0.33 * scale, -0.05 * scale)
+        verts.extend([p_sh_top, p_sh_back, p_tip, p_mid])
+        if sign == 1:
+            faces.append([w_start, w_start + 3, w_start + 2, w_start + 1])
+            colors.append(col_navy)
+            faces.append([w_start, w_start + 1, w_start + 2, w_start + 3])
+            colors.append((238, 242, 248))
+        else:
+            faces.append([w_start, w_start + 1, w_start + 2, w_start + 3])
+            colors.append(col_navy)
+            faces.append([w_start, w_start + 3, w_start + 2, w_start + 1])
+            colors.append((238, 242, 248))
 
     return verts, faces, colors
 

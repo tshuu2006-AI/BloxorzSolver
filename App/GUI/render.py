@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import math
 import random
-from typing import List, Optional, Sequence, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 
 import pygame
 import pygame.gfxdraw as gfx
@@ -19,7 +19,10 @@ import pygame.gfxdraw as gfx
 from App.Components.features import SwitchType, TileType
 from App.GUI import theme
 from App.GUI.models import Frame3D, INITIAL_FRAME, get_penguin_mesh, get_cactus_mesh
+from App.Components.state import Orientation, State
+from App.GUI.pieces import pieces_of
 from App.GUI.theme import mix, shade
+from App.GUI.widgets import draw_text, rrect
 
 Cell = Tuple[int, int]
 
@@ -223,7 +226,7 @@ class BoardRenderer:
         self._static_layer: Optional[pygame.Surface] = None
 
         if theme_name is not None:
-            self._theme_name = theme_name
+            self._theme_name = str(theme_name).lower()
         elif arctic_theme:
             self._theme_name = "arctic"
         else:
@@ -272,7 +275,7 @@ class BoardRenderer:
 
     def set_theme(self, name: str) -> None:
         """Đổi phong cách chủ đề trực quan (arctic hoặc desert)."""
-        self._theme_name = name
+        self._theme_name = (str(name).lower() if name else "arctic")
         self._update_bridge_colors()
 
     def set_arctic_theme(self, on: bool) -> None:
@@ -819,24 +822,215 @@ class BoardRenderer:
 
         ``done`` là số hành động đã chạy trong replay (các bước đã qua sáng hơn);
         ``None`` nghĩa là không đang replay, vẽ tất cả ở độ sáng vừa.
+
+        Cơ chế hàng đợi số bước (tránh đè số):
+        - Ô nào số bị đè nhau thì chỉ hiển thị số bé hơn (bước sớm nhất chưa hoàn thành).
+        - Khi đã đi qua ô đó rồi (bước <= done), số tiếp theo mới hiện lên (như hàng đợi).
         """
+        if not steps:
+            return
         iso = self.iso
         last = max((s["step"] for s in steps), default=1)
         size = max(11, int(iso.L * 0.24))
+
+        # 1. Vẽ các ô sàn (diamonds): tập hợp bước active cho từng ô để không bị chồng chéo màu
+        cell_steps: Dict[Tuple[int, int], List[dict]] = {}
         for s in steps:
-            t = (s["step"] - 1) / max(1, last - 1)
-            col = mix(*(palette or (theme.INFO, theme.ACCENT)), t)
-            reached = done is None or s["step"] <= done
-            fill, line = (84 if done is None else 120, 200) if reached else (34, 96)
             for cell in s["cells"]:
-                pts = [(int(x), int(y)) for x, y in self._diamond(cell, 0.41, 0.025)]
-                gfx.filled_polygon(surf, pts, (*col, fill))
-                gfx.aapolygon(surf, pts, (*col, line))
-            r, c = s["cells"][0]
+                cell_steps.setdefault(cell, []).append(s)
+
+        for cell, c_steps in cell_steps.items():
+            if done is not None:
+                active_s = next((s for s in c_steps if s["step"] > done), c_steps[-1])
+            else:
+                active_s = c_steps[0]
+
+            t = (active_s["step"] - 1) / max(1, last - 1)
+            col = mix(*(palette or (theme.INFO, theme.ACCENT)), t)
+            reached = done is None or active_s["step"] <= done
+            fill, line = (84 if done is None else 120, 200) if reached else (34, 96)
+
+            pts = [(int(x), int(y)) for x, y in self._diamond(cell, 0.41, 0.025)]
+            gfx.filled_polygon(surf, pts, (*col, fill))
+            gfx.aapolygon(surf, pts, (*col, line))
+
+        # 2. Vẽ nhãn số bước (labels) theo cơ chế hàng đợi
+        label_steps: Dict[Tuple[int, int], List[dict]] = {}
+        for s in steps:
+            label_steps.setdefault(s["cells"][0], []).append(s)
+
+        for cell, l_steps in label_steps.items():
+            if done is not None:
+                active_s = next((s for s in l_steps if s["step"] > done), l_steps[-1])
+            else:
+                active_s = l_steps[0]
+
+            t = (active_s["step"] - 1) / max(1, last - 1)
+            col = mix(*(palette or (theme.INFO, theme.ACCENT)), t)
+            reached = done is None or active_s["step"] <= done
+
+            r, c = cell
             x, y = iso.p(r + 0.5, c + 0.5, 0.04)
-            img = self._label(str(s["step"]), size, col if reached else theme.TEXT_DIM)
+            img = self._label(str(active_s["step"]), size, col if reached else theme.TEXT_DIM)
             surf.blit(img, img.get_rect(center=(int(x), int(y))))
+
+    def draw_ghost_step(self, surf, next_state, action: Optional[str] = None, current_state: Optional[State] = None) -> None:
+        """Vẽ cái bóng của bước đi tiếp theo kèm hướng đi và nút bấm WASD."""
+        is_desert = self.is_desert
+        ghost_color = (255, 185, 75) if is_desert else (80, 225, 255)
+        ghost_border = (255, 225, 140) if is_desert else (180, 245, 255)
+        key_border = (255, 205, 95) if is_desert else (100, 230, 255)
+
+        pulse = 0.5 + 0.5 * math.sin(self.time * 5.0)
+        deltas = {"U": (-1, 0), "D": (1, 0), "L": (0, -1), "R": (0, 1)}
+
+        # Xác định vị trí đích và các khối ghost cần vẽ (xử lý chuẩn xác cả khi SPLIT)
+        ghost_footprints = []
+        ghost_pcs = []
+        p_next_r, p_next_c, p_next_h = 0.0, 0.0, 1.0
+
+        if current_state is not None:
+            if current_state.is_split:
+                idx = current_state.active_block
+                cur_cells = (current_state.get_occupied_cells()[idx],)
+                cur_h = 1.0
+                if action == "SWITCH":
+                    tgt_cell = current_state.get_occupied_cells()[1 - idx]
+                    ghost_footprints = [tgt_cell]
+                    p_next_r, p_next_c, p_next_h = tgt_cell[0] + 0.5, tgt_cell[1] + 0.5, 0.5
+                elif next_state.is_split:
+                    dr, dc = deltas.get(action, (0, 0))
+                    dest_cell = (cur_cells[0][0] + dr, cur_cells[0][1] + dc)
+                    ghost_footprints = [dest_cell]
+                    ghost_pcs = [{"cells": [dest_cell], "kind": "cube", "height": 1.0}]
+                    p_next_r, p_next_c, p_next_h = dest_cell[0] + 0.5, dest_cell[1] + 0.5, 0.5
+                else:
+                    # Hợp nhất (merge) thành 1 khối
+                    nxt_cells = next_state.get_occupied_cells()
+                    nxt_h = 2.0 if next_state.orientation == Orientation.STANDING else 1.0
+                    ghost_footprints = list(nxt_cells)
+                    ghost_pcs = [{"cells": list(nxt_cells), "kind": "block", "height": nxt_h}]
+                    p_next_r = sum(r for r, c in nxt_cells) / len(nxt_cells) + 0.5
+                    p_next_c = sum(c for r, c in nxt_cells) / len(nxt_cells) + 0.5
+                    p_next_h = nxt_h * 0.5
+            else:
+                cur_cells = current_state.get_occupied_cells()
+                cur_h = 2.0 if current_state.orientation == Orientation.STANDING else 1.0
+                if next_state.is_split:
+                    ghost_pcs = pieces_of(next_state)
+                    ghost_footprints = list(next_state.get_occupied_cells())
+                    act_cell = next_state.get_occupied_cells()[next_state.active_block]
+                    p_next_r, p_next_c, p_next_h = act_cell[0] + 0.5, act_cell[1] + 0.5, 0.5
+                else:
+                    ghost_pcs = pieces_of(next_state)
+                    ghost_footprints = list(next_state.get_occupied_cells())
+                    nxt_cells = next_state.get_occupied_cells()
+                    nxt_h = 2.0 if next_state.orientation == Orientation.STANDING else 1.0
+                    p_next_r = sum(r for r, c in nxt_cells) / len(nxt_cells) + 0.5
+                    p_next_c = sum(c for r, c in nxt_cells) / len(nxt_cells) + 0.5
+                    p_next_h = nxt_h * 0.5
+        else:
+            cur_cells = next_state.get_occupied_cells()
+            cur_h = 2.0 if next_state.orientation == Orientation.STANDING else 1.0
+            ghost_pcs = pieces_of(next_state)
+            ghost_footprints = list(next_state.get_occupied_cells())
+            p_next_r = sum(r for r, c in cur_cells) / len(cur_cells) + 0.5
+            p_next_c = sum(c for r, c in cur_cells) / len(cur_cells) + 0.5
+            p_next_h = cur_h * 0.5
+
+        # 1. Vẽ dấu sàn (floor footprint) nơi khối sẽ đáp xuống
+        for cell in ghost_footprints:
+            pts = [(int(x), int(y)) for x, y in self._diamond(cell, 0.44, 0.02)]
+            gfx.filled_polygon(surf, pts, (*ghost_color, int(45 + 35 * pulse)))
+            gfx.aapolygon(surf, pts, (*ghost_border, int(160 + 80 * pulse)))
+            pts_ring = [(int(x), int(y)) for x, y in self._diamond(cell, 0.48 + 0.02 * pulse, 0.02)]
+            gfx.aapolygon(surf, pts_ring, (*ghost_color, int(70 + 40 * pulse)))
+
+        # 2. Vẽ khối bóng 3D mờ (Ghost Block)
+        ghost_alpha = 0.36 + 0.12 * pulse
+        for pc in ghost_pcs:
+            self.draw_piece(
+                surf,
+                pc["cells"],
+                pc["kind"],
+                pc["height"],
+                alpha=ghost_alpha,
+                color=ghost_color,
+                shadow=True,
+                draw_penguin=False,
+            )
+
+        # 3. Tính tọa độ màn hình
+        p_next = self.iso.p(p_next_r, p_next_c, p_next_h)
+
+        p_curr = None
+        if current_state is not None:
+            r_c = sum(r for r, c in cur_cells) / len(cur_cells) + 0.5
+            c_c = sum(c for r, c in cur_cells) / len(cur_cells) + 0.5
+            p_curr = self.iso.p(r_c, c_c, cur_h * 0.5)
+
+        # 4. Mũi tên chỉ hướng lăn
+        if p_curr is not None:
+            dx = p_next[0] - p_curr[0]
+            dy = p_next[1] - p_curr[1]
+            dist = math.hypot(dx, dy)
+            if dist > 14:
+                ux, uy = dx / dist, dy / dist
+                px_norm, py_norm = -uy, ux
+                p_start = (p_curr[0] + dx * 0.26, p_curr[1] + dy * 0.26)
+                p_end = (p_next[0] - dx * 0.20, p_next[1] - dy * 0.20)
+                # Đường nét phát sáng
+                pygame.draw.line(surf, (*ghost_color, 220), (int(p_start[0]), int(p_start[1])), (int(p_end[0]), int(p_end[1])), 4)
+                # Đầu mũi tên nhọn
+                arrow_pts = [
+                    (int(p_end[0] + ux * 8), int(p_end[1] + uy * 8)),
+                    (int(p_end[0] - ux * 10 + px_norm * 8), int(p_end[1] - uy * 10 + py_norm * 8)),
+                    (int(p_end[0] - ux * 10 - px_norm * 8), int(p_end[1] - uy * 10 - py_norm * 8)),
+                ]
+                gfx.filled_polygon(surf, arrow_pts, (*ghost_border, 240))
+                gfx.aapolygon(surf, arrow_pts, (255, 255, 255, 255))
+
+        # 5. Floating Key Badge (Nút WASD)
+        if action:
+            key_map = {"U": "W", "D": "S", "L": "A", "R": "D", "SWITCH": "SPACE"}
+            dir_names = {"U": "UP", "D": "DOWN", "L": "LEFT", "R": "RIGHT", "SWITCH": "SWITCH"}
+            is_switch = action == "SWITCH"
+            key_text = key_map.get(action, "?")
+            sub_text = dir_names.get(action, "")
+
+            if p_curr is not None:
+                bx = (p_curr[0] + p_next[0]) / 2.0
+                by = min(p_curr[1], p_next[1]) - 36
+            else:
+                bx = p_next[0]
+                by = p_next[1] - 46
+
+            bw = 92 if is_switch else 54
+            bh = 46 if is_switch else 50
+            badge_r = pygame.Rect(0, 0, bw, bh)
+            badge_r.center = (int(bx), int(by))
+
+            # Bóng đổ của phím
+            sh_r = pygame.Rect(badge_r.x, badge_r.y + 4, bw, bh)
+            rrect(surf, sh_r, (0, 0, 0, 160), radius=10)
+
+            # Thân phím (Key cap)
+            key_bg = (34, 18, 28, 248) if is_desert else (16, 26, 44, 248)
+            rrect(surf, badge_r, key_bg, radius=10, border=key_border, border_w=2)
+
+            # Highlight mép trên phím
+            pygame.draw.line(surf, (255, 255, 255, 180), (badge_r.x + 6, badge_r.y + 2), (badge_r.right - 6, badge_r.y + 2), 1)
+
+            # Chữ phím (W, A, S, D, SPACE)
+            font_sz = 16 if is_switch else 24
+            draw_text(surf, key_text, theme.font(font_sz, True), (255, 255, 255), (badge_r.centerx, badge_r.y + (16 if sub_text else 22)), "center")
+            if sub_text:
+                draw_text(surf, sub_text, theme.font(11, True), key_border, (badge_r.centerx, badge_r.bottom - 10), "center")
+
+            # Chỉ một vệt leader line mờ nối xuống tâm cái bóng
+            pygame.draw.line(surf, (*key_border, 110), (badge_r.centerx, badge_r.bottom + 2), (int(p_next[0]), int(p_next[1] - 10)), 1)
     # ------------------------------------------------------------------ khối
+
     def draw_floor_ring(self, surf, cell, color, strength=1.0):
         pulse = 0.5 + 0.5 * math.sin(self.time * 5.0)
         pts = [(int(x), int(y)) for x, y in self._diamond(cell, 0.5 + 0.02 * pulse, 0.03)]
@@ -1072,7 +1266,7 @@ class BoardRenderer:
             if self.arctic_theme:
                 # Khối băng trong suốt bao bọc bên ngoài
                 lum = 0.60 + 0.55 * max(0.0, _dot(n, self.iso.light))
-                ice_base = theme.ARCTIC_ICE_BLOCK if active else (150, 195, 225)
+                ice_base = color if color is not None else (theme.ARCTIC_ICE_BLOCK if active else (150, 195, 225))
                 col = shade(ice_base, lum)
                 pts = [self.iso.p(*v) for v in q]
                 poly(surf, (*col, int(130 * alpha)), pts)

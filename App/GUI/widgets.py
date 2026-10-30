@@ -36,6 +36,10 @@ def wrap_text(text: str, font: pygame.font.Font, width: int) -> List[str]:
 def rrect(surf, rect, color, radius=12, border=None, border_w=2):
     """Hình chữ nhật bo góc, hỗ trợ màu có alpha."""
     rect = pygame.Rect(rect)
+    if color is None:
+        if border:
+            pygame.draw.rect(surf, border, rect, border_w, border_radius=radius)
+        return
     if len(color) == 4 and color[3] < 255:
         tmp = pygame.Surface(rect.size, pygame.SRCALPHA)
         pygame.draw.rect(tmp, color, tmp.get_rect(), border_radius=radius)

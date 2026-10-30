@@ -15,6 +15,7 @@ DEFAULTS: Dict[str, Any] = {
     "show_floor_arrows": True,  # mũi tên vàng trên sàn quanh khối đang điều khiển
     "show_link_lines": False,   # đường nét đứt nối công tắc với cầu nó điều khiển
     "show_path": True,          # lớp phủ đường đi của lời giải
+    "show_step_guide": False,   # gợi ý bước đi tiếp theo (mặc định mở game là OFF)
     "show_tips": True,          # gợi ý hướng dẫn lần đầu gặp mỗi cơ chế
     "astar_heuristic": "relaxed",
     "replay_speed": 1.5,
@@ -73,6 +74,9 @@ class Settings:
             pass  # không ghi được thì thôi, cài đặt chỉ mất khi thoát
 
     # ------------------------------------------------------------------ truy cập
+    def get(self, key: str, default: Any = None) -> Any:
+        return self._v.get(key, default)
+
     def __getattr__(self, name: str):
         # chỉ gọi khi thuộc tính thường không tồn tại
         if name in DEFAULTS:

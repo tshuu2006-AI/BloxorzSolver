@@ -6,6 +6,7 @@ Thiết kế chuẩn Indie Game:
 - Trình chọn Heuristic trực quan cho A*.
 - Nút Benchmark / Đua thuật toán thời gian thực ([RACE]).
 - Bộ điều khiển Replay trực quan với thanh tiến trình và thanh tốc độ độc lập.
+- Nút bật/tắt Lộ trình (Full Path) và Chỉ dẫn từng bước (Step Guide) kèm nhận diện thuật toán đang chọn.
 - Thẻ số liệu Telemetry rộng rãi hiển thị đầy đủ thông số lời giải.
 """
 
@@ -88,27 +89,31 @@ class SolverDrawer:
             font_size=16,
         )
 
-        # Nút điều khiển Replay
-        ry = self.rect.y + 448
-        bw_s = 52
-        bw_pp = 152
-        bw_path = 144
+        # Hàng 1 điều khiển Replay: |<  <  Pause  >
+        ry1 = self.rect.y + 448
+        bw_s = 56
         gap = 8
-        self.btn_restart_replay = Button((x0, ry, bw_s, 40), "|<", self._restart_replay, tooltip="Restart Replay", font_size=16)
-        self.btn_step_back = Button((x0 + bw_s + gap, ry, bw_s, 40), "<", lambda: self.app._request_step(-1), tooltip="Step back (,)", font_size=18)
-        self.btn_play_pause = Button((x0 + (bw_s + gap) * 2, ry, bw_pp, 40), "Pause", self.app.toggle_pause, font_size=15)
-        self.btn_step_fwd = Button((x0 + (bw_s + gap) * 2 + bw_pp + gap, ry, bw_s, 40), ">", lambda: self.app._request_step(1), tooltip="Step fwd (.)", font_size=18)
-        self.btn_path = Button((x0 + pw - bw_path, ry, bw_path, 40), "Path: ON", self.app.toggle_path, tooltip="Toggle path (V)", font_size=14)
+        bw_pp = pw - (bw_s * 3 + gap * 3)
+        self.btn_restart_replay = Button((x0, ry1, bw_s, 38), "|<", self._restart_replay, tooltip="Restart Replay", font_size=16)
+        self.btn_step_back = Button((x0 + bw_s + gap, ry1, bw_s, 38), "<", lambda: self.app._request_step(-1), tooltip="Step back (,)", font_size=18)
+        self.btn_play_pause = Button((x0 + (bw_s + gap) * 2, ry1, bw_pp, 38), "Pause", self.app.toggle_pause, font_size=15)
+        self.btn_step_fwd = Button((x0 + (bw_s + gap) * 2 + bw_pp + gap, ry1, bw_s, 38), ">", lambda: self.app._request_step(1), tooltip="Step fwd (.)", font_size=18)
 
-        # Slider renders its label and value on one line above the track.
-        self.slider = Slider((x0, self.rect.y + 558, pw, 18), 0.5, 4.0, self.app.speed, label="Replay Speed", fmt="{:.2f}x")
+        # Hàng 2 điều khiển Lộ trình & Step Guide: Full Path | Step Guide
+        ry2 = self.rect.y + 494
+        bw_half = (pw - gap) // 2
+        self.btn_path = Button((x0, ry2, bw_half, 38), "Full Path: ON", self.app.toggle_path, tooltip="Toggle full path (V)", font_size=14)
+        self.btn_step = Button((x0 + bw_half + gap, ry2, bw_half, 38), "Step Guide: OFF", self.app.toggle_step_guide, tooltip="Select an algorithm first", font_size=14)
+
+        # Slider tốc độ Replay: nhãn hiển thị ở ry - 30 (y + 582), track ở y + 612
+        self.slider = Slider((x0, self.rect.y + 612, pw, 18), 0.5, 4.0, self.app.speed, label="Replay Speed", fmt="{:.2f}x")
 
         # Thẻ thông số Telemetry
-        self.stats_box = pygame.Rect(x0, self.rect.y + 618, pw, self.h - 644)
+        self.stats_box = pygame.Rect(x0, self.rect.y + 674, pw, self.rect.bottom - (self.rect.y + 674) - 36)
         # Nút dừng lần giải đang chạy (chỉ hiện khi đang tìm kiếm)
         self.btn_stop = Button(
-            (self.stats_box.right - 124, self.stats_box.y + 22, 106, 40), "Stop",
-            lambda: self.app.cancel_solver(), font_size=16,
+            (self.stats_box.right - 116, self.stats_box.y + 14, 100, 34), "Stop",
+            lambda: self.app.cancel_solver(), font_size=15,
         )
 
     def _busy(self) -> bool:
@@ -122,9 +127,9 @@ class SolverDrawer:
 
     def _on_solver_click(self, name: str):
         if name == "A*":
-            # Reveal A*'s heuristic control only after A* is selected.
             self.show_heuristic_button = True
             self.heuristic_menu_open = False
+            self.app.start_solver("A*")
         else:
             self.show_heuristic_button = False
             self.heuristic_menu_open = False
@@ -132,7 +137,7 @@ class SolverDrawer:
 
     def _toggle_heuristic_menu(self):
         self.heuristic_menu_open = not self.heuristic_menu_open
-        self.app.audio.play("swap")
+        self.app.audio.play("switch")
 
     def _heuristic_label(self) -> str:
         return self.app.heuristic.replace("_", " ").title()
@@ -143,7 +148,9 @@ class SolverDrawer:
 
     def _restart_replay(self):
         if self.app.stats and self.app.stats.found:
+            cur_solver = self.app.selected_solver
             self.app.restart()
+            self.app.selected_solver = cur_solver
             self.app._begin_replay(self.app.stats.label, self.app.stats.actions)
 
     def _heuristic_options_rects(self) -> List[Tuple[str, pygame.Rect]]:
@@ -199,8 +206,8 @@ class SolverDrawer:
         if self.btn_compare.handle(event, mouse):
             return True
 
-        # 5. Các nút Replay
-        for b in (self.btn_restart_replay, self.btn_step_back, self.btn_play_pause, self.btn_step_fwd, self.btn_path):
+        # 5. Các nút Replay & Lộ trình
+        for b in (self.btn_restart_replay, self.btn_step_back, self.btn_play_pause, self.btn_step_fwd, self.btn_path, self.btn_step):
             if b.handle(event, mouse):
                 return True
 
@@ -247,8 +254,19 @@ class SolverDrawer:
         self.btn_play_pause.update(dt, mouse)
         self.btn_step_fwd.enabled = has_replay
         self.btn_step_fwd.update(dt, mouse)
-        self.btn_path.label = "Path: ON" if self.app.show_path else "Path: OFF"
+
+        self.btn_path.label = "Full Path: ON" if self.app.show_path else "Full Path: OFF"
         self.btn_path.update(dt, mouse)
+
+        has_solver = (self.app.selected_solver is not None)
+        self.btn_step.enabled = has_solver
+        if not has_solver:
+            self.btn_step.label = "Step Guide: OFF"
+            self.btn_step.tooltip = "Select an algorithm first"
+        else:
+            self.btn_step.label = "Step Guide: ON" if self.app.show_step_guide else "Step Guide: OFF"
+            self.btn_step.tooltip = "Toggle step guide (B/H)"
+        self.btn_step.update(dt, mouse)
 
     def draw(self, surf: pygame.Surface, mouse: Tuple[int, int]):
         """Vẽ Drawer bóng mờ và toàn bộ nội dung phòng thí nghiệm AI."""
@@ -290,35 +308,45 @@ class SolverDrawer:
 
         # 5. Khu vực chọn thuật toán
         draw_text(surf, "SELECT SEARCH ALGORITHM", theme.font(13, True), accent_title, (x0, self.rect.y + 164))
-        for b in self.solver_buttons.values():
+        for name, b in self.solver_buttons.items():
             b.draw(surf)
+            # Nhận diện trực quan thuật giải đang chọn: viền phát sáng + huy hiệu [ACTIVE]
+            if self.app.selected_solver == name:
+                col = SOLVER_COLORS.get(name, theme.ACCENT)
+                pulse = (math.sin(pygame.time.get_ticks() / 180.0) + 1.0) * 0.5
+                glow = theme.mix(col, (255, 255, 255), 0.35 * pulse)
+                rrect(surf, b.rect.inflate(6, 6), (*glow[:3], 35), radius=15, border=glow, border_w=2)
+                badge_r = pygame.Rect(b.rect.right - 74, b.rect.y + 7, 66, 18)
+                rrect(surf, badge_r, (16, 46, 36, 235), radius=5, border=glow, border_w=1)
+                draw_text(surf, "ACTIVE", theme.font(10, True), (80, 250, 160), badge_r.center, "center")
+
         if self.show_heuristic_button:
             self.btn_heuristic.draw(surf)
         self.btn_compare.draw(surf)
 
         # 6. Khu vực Replay & tua bước
         draw_text(surf, "SOLUTION PLAYBACK & TRANSPORT", theme.font(13, True), accent_title, (x0, self.rect.y + 428))
-        for b in (self.btn_restart_replay, self.btn_step_back, self.btn_play_pause, self.btn_step_fwd, self.btn_path):
+        for b in (self.btn_restart_replay, self.btn_step_back, self.btn_play_pause, self.btn_step_fwd, self.btn_path, self.btn_step):
             b.draw(surf)
 
-        # Thanh tiến trình Replay độc lập (không bị đè)
+        # Thanh tiến trình Replay độc lập (đặt riêng biệt, tuyệt đối không bị đè)
         if self.app.replay or (self.app.stats and self.app.stats.found):
             done = self.app.replay_total - len(self.app.replay) if self.app.replay else len(self.app.replay_done)
             tot = max(1, self.app.replay_total if self.app.replay else (len(self.app.stats.actions) if self.app.stats else 1))
             lbl = self.app.replay_label or (self.app.stats.label if self.app.stats else "Solution")
-            draw_text(surf, f"{lbl} Replay", theme.font(13, True), accent_title, (x0, self.rect.y + 500))
-            draw_text(surf, f"Step {done} / {tot}", theme.mono(14, True), (240, 250, 255), (x0 + w, self.rect.y + 500), "topright")
-            bar_bg = pygame.Rect(x0, self.rect.y + 520, w, 6)
+            draw_text(surf, f"{lbl} Replay", theme.font(13, True), accent_title, (x0, self.rect.y + 542))
+            draw_text(surf, f"Step {done} / {tot}", theme.mono(14, True), (240, 250, 255), (x0 + w, self.rect.y + 542), "topright")
+            bar_bg = pygame.Rect(x0, self.rect.y + 562, w, 6)
             rrect(surf, bar_bg, (40, 25, 35) if is_desert else (30, 45, 70), radius=3)
             prog_w = int(w * min(1.0, done / tot))
             if prog_w > 0:
-                rrect(surf, (x0, self.rect.y + 520, prog_w, 6), accent_title, radius=3)
+                rrect(surf, (x0, self.rect.y + 562, prog_w, 6), accent_title, radius=3)
 
-        # Replay speed label and value are rendered by the slider without overlap.
+        # Slider tốc độ Replay: bố cục riêng biệt ở y + 612 (nhãn hiển thị ở y + 582, hoàn toàn cách xa)
         self.slider.draw(surf)
 
         # 7. Khu vực Telemetry & Số liệu
-        draw_text(surf, "SOLVER TELEMETRY & METRICS", theme.font(13, True), accent_title, (x0, self.rect.y + 596))
+        draw_text(surf, "SOLVER TELEMETRY & METRICS", theme.font(13, True), accent_title, (x0, self.rect.y + 652))
         box = self.stats_box
         box_bg = (28, 16, 26, 230) if is_desert else (18, 28, 48, 225)
         box_bdr = (100, 58, 50) if is_desert else (50, 80, 125)
@@ -392,7 +420,7 @@ class SolverDrawer:
                 draw_text(surf, v, theme.mono(16, True), (245, 252, 255), (box.right - 18, y + 4), "topright")
 
         # 8. Chú thích phím tắt chân bảng
-        hint = "[ESC] Close Drawer   |   [V] Solution Path   |   [P] Pause Replay"
+        hint = "[ESC] Close Drawer   |   [V] Solution Path   |   [B] Step Guide   |   [P] Pause"
         draw_text(surf, hint, theme.font(13), theme.TEXT_FAINT, (x0 + w // 2, self.rect.bottom - 16), "center")
 
         # 9. Vẽ menu Heuristic thả xuống (nếu đang mở)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import List, Sequence, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from App.Components.problem import Problem
 from App.Components.state import Orientation, State
@@ -41,3 +41,69 @@ def path_steps(problem: Problem, actions: Sequence[str]) -> List[dict]:
             cells = (b1, b2)
         steps.append({"step": i, "action": a, "cells": cells})
     return steps
+
+
+def solve_by_algorithm(problem: Problem, solver_name: str, heuristic: Optional[str] = None) -> Optional[List[str]]:
+    """Giải problem bằng thuật giải cụ thể."""
+    from App.Game.solver_bridge import make_solver
+    try:
+        solver = make_solver(solver_name, heuristic)
+        return solver.solve(problem)
+    except Exception:
+        return None
+
+
+def compute_step_guide(
+    problem: Problem,
+    current_state: State,
+    cached_solution: Optional[Sequence[str]] = None,
+    cached_states: Optional[Sequence[State]] = None,
+    solver_name: Optional[str] = None,
+    heuristic: Optional[str] = None,
+) -> Optional[dict]:
+    """Tìm bước đi kế tiếp (hành động, trạng thái kế tiếp, lộ trình) từ trạng thái hiện tại theo thuật giải được chọn."""
+    if problem.is_goal(current_state):
+        return None
+
+    # 1. Thử dùng lộ trình có sẵn nếu current_state nằm trong lộ trình
+    if cached_solution and cached_states and len(cached_states) == len(cached_solution) + 1:
+        try:
+            idx = cached_states.index(current_state)
+            if idx < len(cached_solution):
+                act = cached_solution[idx]
+                nxt = cached_states[idx + 1]
+                remaining_actions = cached_solution[idx:]
+                remaining_states = cached_states[idx:]
+                return {
+                    "action": act,
+                    "next_state": nxt,
+                    "solution": list(remaining_actions),
+                    "states": list(remaining_states),
+                }
+        except ValueError:
+            pass
+
+    # 2. Nếu đi chệch ô hoặc chưa có lộ trình, giải lại từ trạng thái hiện tại theo solver_name
+    if not solver_name:
+        return None
+
+    sub_problem = Problem(
+        grid=problem.grid,
+        goal_pos=problem.goal_pos,
+        initial_state=current_state,
+        bridge_indices=problem.bridge_indices,
+        switches=problem.switches,
+    )
+    acts = solve_by_algorithm(sub_problem, solver_name, heuristic)
+    if acts:
+        act = acts[0]
+        nxt = problem.result(current_state, act)
+        if nxt is not None:
+            new_states = replay_states(sub_problem, acts)
+            return {
+                "action": act,
+                "next_state": nxt,
+                "solution": acts,
+                "states": new_states,
+            }
+    return None
