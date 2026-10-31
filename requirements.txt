@@ -1,5 +1,5 @@
 # Core dependencies to play the game and run all search algorithms
 pygame-ce>=2.5.0
 
-# Optional dependency for benchmark plots (tools/benchmark.py --plots)
+# Optional dependency for benchmark plots (benchmark.py --plots)
 matplotlib>=3.8.0

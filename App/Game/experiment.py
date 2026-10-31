@@ -1,4 +1,4 @@
-"""Chạy một cấu hình solver trên một màn và gom số liệu; dùng chung cho tools/benchmark.py và GUI.
+"""Chạy một cấu hình solver trên một màn và gom số liệu; dùng chung cho benchmark.py và GUI.
 
 Mỗi lần chạy trả về một ``dict`` (một "dòng kết quả") gồm: set, level_no, level, group, rows,
 cols, solver, status ("ok" | "no_solution" | "timeout" | "cancelled" | "error: ..."), length,

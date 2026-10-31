@@ -25,9 +25,24 @@ class BaseSolver(ABC):
         self.solution_cost: int = 0
         self.problem: Problem
 
+    def solve(self, problem: Problem) -> Optional[List[str]]:
+        """Search ``problem`` for a solution, recording runtime and peak memory.
+
+        Calls ``_search(problem)`` implemented by subclasses.
+        """
+        self.problem = problem
+        start_time = time.time()
+        tracemalloc.start()
+        try:
+            return self._search(problem)
+        finally:
+            self.search_time = time.time() - start_time
+            self.memory_usage = tracemalloc.get_traced_memory()[1]
+            tracemalloc.stop()
+
     @abstractmethod
-    def solve(self, problem: Problem):
-        """Search ``problem`` for a solution.
+    def _search(self, problem: Problem) -> Optional[List[str]]:
+        """Subclasses implement pure search logic here.
 
         Subclasses should return the sequence of actions, or ``None`` if no
         solution exists.
@@ -84,21 +99,17 @@ class BestFirstSearchSolver(BaseSolver):
         pass
 
 
-    def solve(self, problem: Problem) -> Optional[List[str]]:
+    def _search(self, problem: Problem) -> Optional[List[str]]:
         """Find a least-cost solution using the subclass's node priority.
 
         Tracks the cheapest known path to each state and skips stale frontier
         entries. Returns the action sequence, or ``None`` if the goal is
         unreachable.
         """
-        self.problem = problem
-        start_time = time.time()
-        tracemalloc.start()
-
         self.expanded_nodes = 0
         root_node = Node(state=problem.initial_state)
 
-        frontier: PriorityQueue = PriorityQueue(key = self.evaluate)
+        frontier: PriorityQueue = PriorityQueue(key=self.evaluate)
         frontier.push(root_node)
 
         best_cost: Dict[State, int] = {root_node.state: 0}
@@ -130,10 +141,6 @@ class BestFirstSearchSolver(BaseSolver):
                     best_cost[child_state] = child_cost
                     child_node = Node(state=child_state, parent=current_node, action=action, path_cost=child_cost)
                     frontier.push(child_node)
-
-        self.search_time = time.time() - start_time
-        self.memory_usage = tracemalloc.get_traced_memory()[1]
-        tracemalloc.stop()
 
         return solution
 

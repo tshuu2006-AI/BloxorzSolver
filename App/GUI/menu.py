@@ -590,7 +590,7 @@ class MainMenu:
             ("Course", "Cơ sở Trí tuệ Nhân tạo (CSAI)"),
             ("Institution", "Trường Đại học Khoa học Tự nhiên - ĐHQG HCM"),
             ("Project", "Bloxorz Solver"),
-            ("AI Solvers", "BFS, DFS, UCS, A* (Manhattan, Euclidean, Walking Dist, Pattern DB)"),
+            ("AI Solvers", "BFS, DFS, UCS, A*"),
         ]
 
         text_y = my + 110

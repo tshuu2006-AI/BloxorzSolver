@@ -1,7 +1,5 @@
 """Breadth-first search solver for Bloxorz state spaces."""
 
-import time
-import tracemalloc
 from collections import deque
 from typing import Optional, List
 
@@ -12,11 +10,7 @@ from App.Solvers.base_solver import BaseSolver
 
 class BFSSolver(BaseSolver):
 
-    def solve(self, problem: Problem) -> Optional[List[str]]:
-        self.problem = problem
-        start_time = time.time()
-        tracemalloc.start()
-
+    def _search(self, problem: Problem) -> Optional[List[str]]:
         self.expanded_nodes = 0
         root_node = Node(state=problem.initial_state, path_cost=0)
         
@@ -47,9 +41,5 @@ class BFSSolver(BaseSolver):
                         path_cost=current_node.path_cost + step_cost
                     )
                     queue.append(child_node)
-
-        self.search_time = time.time() - start_time
-        self.memory_usage = tracemalloc.get_traced_memory()[1]
-        tracemalloc.stop()
 
         return solution

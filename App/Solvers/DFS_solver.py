@@ -1,8 +1,6 @@
 """
 Implementation of a solver with Depth-First Search Algorithm
 """
-import time
-import tracemalloc
 from typing import Optional, List
 
 from App.Components.node import Node
@@ -15,15 +13,11 @@ class DFSSolver(BaseSolver):
     def __init__(self):
         super().__init__()
 
-    def solve(self, problem: Problem) -> Optional[List[str]]:
+    def _search(self, problem: Problem) -> Optional[List[str]]:
         """
         :param problem: the problem that need to be solved
         :return:
         """
-        self.problem = problem
-        start_time = time.time()
-        tracemalloc.start()
-
         self.expanded_nodes = 0
         root_node = Node(state=problem.initial_state)
         stack = [root_node]
@@ -55,9 +49,5 @@ class DFSSolver(BaseSolver):
                         path_cost=current_node.path_cost + step_cost
                     )
                     stack.append(child_node)
-
-        self.search_time = time.time() - start_time
-        self.memory_usage = tracemalloc.get_traced_memory()[1]
-        tracemalloc.stop()
 
         return solution

@@ -6,7 +6,7 @@ import unittest
 from pathlib import Path
 
 from App.Components.level_loader import load_level
-from tools import benchmark
+import benchmark
 
 LEVELS = Path(benchmark.LEVELS_DIR)
 
