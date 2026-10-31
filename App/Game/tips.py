@@ -19,8 +19,8 @@ TIPS: Dict[str, Tuple[str, str]] = {
     ),
     "switch": (
         "Switches and bridges",
-        "A round switch works with any part of the block. Matching colours link a switch to its "
-        "bridges: it can open them, close them or flip them.",
+        "A round switch works with any part of the block. Solid switches toggle bridges, "
+        "while hollow ring switches activate them permanently.",
     ),
     "heavy": (
         "Heavy switches",

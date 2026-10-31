@@ -66,3 +66,11 @@ class Switch:
         if self.effects is not None:
             return self.effects
         return [(cell, self.mode, self.target_state) for cell in self.linked_bridges]
+
+    @property
+    def is_permanent(self) -> bool:
+        """Kiểm tra công tắc có phải là công tắc một chiều (PERMANENT) mở/đóng vĩnh viễn hay không."""
+        if self.effects is not None:
+            return any(m == SwitchMode.PERMANENT for _, m, _ in self.effects)
+        return self.mode == SwitchMode.PERMANENT
+

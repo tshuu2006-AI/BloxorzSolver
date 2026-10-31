@@ -16,7 +16,7 @@ from typing import Dict, List, Optional, Sequence, Tuple
 import pygame
 import pygame.gfxdraw as gfx
 
-from App.Components.features import SwitchType, TileType
+from App.Components.features import SwitchMode, SwitchType, TileType
 from App.GUI import theme
 from App.GUI.models import Frame3D, INITIAL_FRAME, get_penguin_mesh, get_cactus_mesh
 from App.Components.state import Orientation, State
@@ -622,13 +622,41 @@ class BoardRenderer:
                 col = (255, 190, 35)  # Hổ phách vàng
             else:
                 col = (195, 105, 255)  # Thạch anh tím
+        else:
+            if sw.switch_type == SwitchType.SOFT:
+                col = (235, 65, 85)
 
         p = self.iso.p
         cr, cc = cell[0] + 0.5, cell[1] + 0.5
         if sw.switch_type == SwitchType.SOFT:
-            poly(surf, shade(col, 0.55), self._ring(cell, 0.34, 8, math.pi / 8, 0.012))
-            poly(surf, col, self._ring(cell, 0.26, 8, math.pi / 8, 0.03))
-            poly(surf, shade(col, 1.25), self._ring(cell, 0.14, 8, math.pi / 8, 0.05))
+            if sw.is_permanent:
+                # Công tắc tròn đỏ Dạng Permanent (một chiều): hình tròn rỗng màu đỏ
+                n = 24
+                out_b = self._ring(cell, 0.36, n=n, z=0.010)
+                in_b = self._ring(cell, 0.18, n=n, z=0.010)
+                out_t = self._ring(cell, 0.33, n=n, z=0.035)
+                in_t = self._ring(cell, 0.21, n=n, z=0.035)
+
+                col_rim_out = shade(col, 0.45)
+                col_rim_in = shade(col, 0.35)
+                for k in range(n):
+                    kn = (k + 1) % n
+                    poly(surf, col_rim_out, [out_b[k], out_b[kn], out_t[kn], out_t[k]])
+                    poly(surf, col_rim_in, [in_t[k], in_t[kn], in_b[kn], in_b[k]])
+
+                for k in range(n):
+                    kn = (k + 1) % n
+                    poly(surf, col, [out_t[k], out_t[kn], in_t[kn], in_t[k]])
+
+                ipts_out = [(int(round(x)), int(round(y))) for x, y in out_t]
+                ipts_in = [(int(round(x)), int(round(y))) for x, y in in_t]
+                gfx.aapolygon(surf, ipts_out, shade(col, 1.40))
+                gfx.aapolygon(surf, ipts_in, shade(col, 0.80))
+            else:
+                # Công tắc tròn đỏ Dạng Toggle (hai chiều): hình tròn đặc
+                poly(surf, shade(col, 0.55), self._ring(cell, 0.34, 8, math.pi / 8, 0.012))
+                poly(surf, col, self._ring(cell, 0.26, 8, math.pi / 8, 0.03))
+                poly(surf, shade(col, 1.25), self._ring(cell, 0.14, 8, math.pi / 8, 0.05))
         elif sw.switch_type == SwitchType.HEAVY:
             poly(surf, (26, 30, 44), self._ring(cell, 0.40, 4, math.pi / 4, 0.012), shade(col, 0.8))
             for a, b in (((-0.2, -0.2), (0.2, 0.2)), ((-0.2, 0.2), (0.2, -0.2))):
