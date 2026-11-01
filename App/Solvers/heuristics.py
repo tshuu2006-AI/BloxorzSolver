@@ -74,6 +74,7 @@ class RelaxedConfigurationHeuristic(BaseHeuristic):
         # graph (for example, a malformed board configuration).
         return self._distances.get(self._without_bridges(state), 0)
 
+
     @staticmethod
     def _without_bridges(state: State) -> State:
         return State(
@@ -237,7 +238,7 @@ class ModifiedManhattanHeuristic(ManhattanHeuristic):
         row, col = cls._center(state)
         distance = abs(row - destination[0]) + abs(col - destination[1])
         movement = int((distance + 1.5 - 1e-9) // 1.5)
-        separation = 0
+        separation = 1
         if state.orientation == Orientation.SPLIT:
             # One cube moves by at most one cell per roll. Reducing the
             # Manhattan separation to adjacency takes at least D - 1 rolls;
@@ -293,6 +294,9 @@ class ModifiedManhattanHeuristic(ManhattanHeuristic):
             )
 
     def __call__(self, state: State, problem: Problem) -> float:
+        if problem.is_goal(state):
+            return 0.0
+
         split_switches = [
             switch
             for switch in problem.switches.values()
